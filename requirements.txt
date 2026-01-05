@@ -1,0 +1,4 @@
+PyQt6==6.10.1
+pyqt6_sip==13.10.3
+python-dotenv==1.2.1
+Requests==2.32.5

@@ -1,0 +1,23 @@
+# .gitignore for iBroadcast Eel project
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+venv/
+
+# VS Code settings
+.vscode/
+
+# Environment variables
+.env
+
+# OAuth token file
+token.json
+
+# macOS system files
+.DS_Store
+
+# Windows system files
+Thumbs.db
