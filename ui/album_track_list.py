@@ -1,53 +1,107 @@
-from PyQt6.QtWidgets import QFrame, QVBoxLayout, QTableWidget, QTableWidgetItem, QPushButton, QHeaderView
-from PyQt6.QtCore import Qt, pyqtSignal
+import flet as ft
+import asyncio
 
-class AlbumTrackList(QFrame):
-    playTrackRequested = pyqtSignal(object)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setStyleSheet("background-color: #181818; border: none;")
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(40, 0, 40, 40)
-        layout.setSpacing(0)
-
-        self.table = QTableWidget()
-        self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(["#", "Title", "Duration", ""])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setShowGrid(False)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.table.setStyleSheet("""
-            QTableWidget { background-color: #181818; color: #fff; font-size: 16px; }
-            QHeaderView::section { background-color: #181818; color: #b3b3b3; font-size: 14px; border: none; }
-            QTableWidget::item:selected { background-color: #282828; }
-        """)
-        layout.addWidget(self.table)
-
+class AlbumTrackList(ft.Container):
+    def __init__(self, play_callback):
+        self.tracks_column = ft.Column(
+            spacing=0,
+            scroll=ft.ScrollMode.AUTO,
+            expand=True,
+        )
+        super().__init__(
+            bgcolor="#181818",
+            expand=True,
+            padding=ft.Padding.only(left=40, right=40, bottom=40),
+            content=ft.Column(
+                controls=[
+                    # Table headers
+                    ft.Row(
+                        controls=[
+                            ft.Container(
+                                ft.Text("#", color="#b3b3b3", size=14),
+                                width=40,
+                            ),
+                            ft.Container(
+                                ft.Text("Title", color="#b3b3b3", size=14),
+                                expand=True,
+                            ),
+                            ft.Container(
+                                ft.Text("Duration", color="#b3b3b3", size=14),
+                                width=80,
+                            ),
+                            ft.Container(
+                                width=40,
+                            ),
+                        ],
+                        height=40,
+                    ),
+                    ft.Divider(height=1, color="#282828"),
+                    self.tracks_column,
+                ],
+                expand=True,
+            ),
+        )
+        self.play_callback = play_callback
+    
     def set_tracks(self, tracks):
-        self.table.setRowCount(len(tracks))
+        self.tracks_column.controls.clear()
         for i, track in enumerate(tracks):
-            num_item = QTableWidgetItem(str(track.get('track', i+1)))
-            num_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            title_item = QTableWidgetItem(track.get('title', 'Unknown'))
-            duration_item = QTableWidgetItem(self.format_duration(track.get('length', 0)))
-            duration_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            play_btn = QPushButton("▶")
-            play_btn.setStyleSheet("background: none; color: #5DADE2; font-size: 18px; border: none;")
-            play_btn.clicked.connect(lambda _, tid=track.get('item_id'): self.play_track(tid))
-            self.table.setItem(i, 0, num_item)
-            self.table.setItem(i, 1, title_item)
-            self.table.setItem(i, 2, duration_item)
-            self.table.setCellWidget(i, 3, play_btn)
-
+            row = ft.Container(
+                content=ft.Row(
+                    controls=[
+                        ft.Container(
+                            ft.Text(
+                                str(track.get('track', i+1)),
+                                color="#b3b3b3",
+                                size=16,
+                            ),
+                            width=40,
+                            alignment=ft.alignment.Alignment.CENTER,
+                        ),
+                        ft.Container(
+                            ft.Text(
+                                track.get('title', 'Unknown'),
+                                color="white",
+                                size=16,
+                            ),
+                            expand=True,
+                            alignment=ft.alignment.Alignment.CENTER_LEFT,
+                        ),
+                        ft.Container(
+                            ft.Text(
+                                self.format_duration(track.get('length', 0)),
+                                color="#b3b3b3",
+                                size=16,
+                            ),
+                            width=80,
+                            alignment=ft.alignment.Alignment.CENTER,
+                        ),
+                        ft.Container(
+                            ft.IconButton(
+                                ft.Icons.PLAY_CIRCLE,
+                                icon_color="#5DADE2",
+                                icon_size=24,
+                                on_click=lambda e, tid=track.get('item_id'): self.play_track(tid),
+                            ),
+                            width=40,
+                        ),
+                    ],
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                height=50,
+                bgcolor="#181818" if i % 2 == 0 else "#1a1a1a",
+                border_radius=4,
+                padding=ft.Padding.symmetric(horizontal=10),
+            )
+            self.tracks_column.controls.append(row)
+    
     def format_duration(self, seconds):
         m, s = divmod(int(seconds), 60)
         return f"{m}:{s:02d}"
-
+    
     def play_track(self, track_id):
-        self.playTrackRequested.emit(track_id)
+        if self.play_callback:
+            if asyncio.iscoroutinefunction(self.play_callback):
+                asyncio.create_task(self.play_callback(track_id))
+            else:
+                self.play_callback(track_id)

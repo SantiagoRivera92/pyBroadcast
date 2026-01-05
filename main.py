@@ -1,170 +1,156 @@
-import sys
-import webbrowser
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QListWidget, QStackedWidget, QFrame, QLineEdit, QLabel)
-from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
-from PyQt6.QtCore import QUrl, Qt
-from PyQt6.QtCore import QTimer
-from PyQt6.QtGui import QFont
+# main.py - WITH Flet-Audio (FIXED for Flet 0.80.1)
+import flet as ft
+import flet_audio as fa
 
+import webbrowser
+import asyncio
 from api.ibroadcast_api import iBroadcastAPI
 
 from ui.library_grid import LibraryGrid
-from ui.player_controls import PlayerControls
 from ui.artist_header import ArtistHeader
+from ui.player_controls import PlayerControls
+from ui.album_header import AlbumHeader
+from ui.album_track_list import AlbumTrackList
 
-class iBroadcastNative(QMainWindow):
-    def __init__(self):
-        super().__init__()
+class iBroadcastFlet:
+    def __init__(self, page: ft.Page):
+        self.page = page
         self.api = iBroadcastAPI()
-        self.media_player = QMediaPlayer()
-        self.audio_output = QAudioOutput()
-        self.media_player.setAudioOutput(self.audio_output)
-        
         self.current_queue = []
         self.current_index = 0
         self.shuffle_enabled = False
-        self.repeat_mode = "off"  # "off", "all", "one"
+        self.repeat_mode = "off"
+        self.is_playing = False
+        self.current_track_id = None
+        self._showing_artist_albums = False
+        
+        self.audio = fa.Audio(src="", autoplay=False, volume=1)
+        self.page.overlay.append(self.audio)
         
         self.init_ui()
-        
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_position)
-        self.timer.start(1000)
-        
-        # Connect media player signals
-        self.media_player.mediaStatusChanged.connect(self.on_media_status_changed)
-        
-        self.check_auth()
+        asyncio.create_task(self.check_auth())
 
     def init_ui(self):
-        self.setWindowTitle("iBroadcast Native")
-        self.resize(1400, 900)
+        self.page.title = "iBroadcast Native"
+        self.page.theme_mode = ft.ThemeMode.DARK
+        self.page.bgcolor = "#121212"
         
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        self.main_layout = QVBoxLayout(central_widget)
-        self.main_layout.setContentsMargins(0, 0, 0, 0)
-        self.main_layout.setSpacing(0)
-
-        # Search Bar Header
-        header = QFrame()
-        header.setFixedHeight(70)
-        header.setStyleSheet("background-color: #000000; border-bottom: 1px solid #282828;")
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(20, 0, 20, 0)
+        # Create UI components first
+        self.search_input = ft.TextField(
+            hint_text="Search tracks, artists, or albums...",
+            width=450,
+            bgcolor="#242424",
+            color="white",
+            border_radius=20,
+            content_padding=10,
+            on_change=self.handle_search,
+            border_color="transparent",
+            focused_border_color="#5DADE2",
+            text_size=14,
+        )
         
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search tracks, artists, or albums...")
-        self.search_input.setFixedWidth(450)
-        self.search_input.setStyleSheet("""
-            QLineEdit { 
-                background-color: #242424; color: white; border-radius: 20px; 
-                padding: 10px 20px; border: 1px solid transparent; font-size: 14px;
-            }
-            QLineEdit:focus { border: 1px solid #5DADE2; }
-        """)
-        self.search_input.textChanged.connect(self.handle_search)
-        header_layout.addWidget(self.search_input)
-        header_layout.addStretch()
-        self.main_layout.addWidget(header)
-
-        # Body
-        top_layout = QHBoxLayout()
-        self.sidebar = QListWidget()
-        self.sidebar.setFixedWidth(250)
-        self.sidebar.addItems(["Home", "Artists", "Albums", "Playlists"])
+        header = ft.Container(
+            content=ft.Row(
+                controls=[
+                    self.search_input,
+                    ft.Container(expand=True),
+                ],
+                alignment=ft.MainAxisAlignment.START,
+            ),
+            bgcolor="#000000",
+            height=70,
+            border=ft.Border.only(bottom=ft.border.BorderSide(1, "#282828")),  # Keep as is
+            padding=ft.Padding.symmetric(horizontal=20),  # Keep as is
+        )
         
-        # Enhanced sidebar styling with larger text
-        self.sidebar.setStyleSheet("""
-            QListWidget {
-                background-color: #000000; 
-                color: #b3b3b3; 
-                border: none; 
-                outline: none;
-                font-size: 16px;
-                font-weight: 600;
-                padding: 10px;
-            }
-            QListWidget::item {
-                padding: 15px 20px;
-                border-radius: 6px;
-                margin: 2px 0px;
-            }
-            QListWidget::item:hover {
-                background-color: #1a1a1a;
-                color: #ffffff;
-            }
-            QListWidget::item:selected {
-                background-color: #282828;
-                color: #5DADE2;
-            }
-        """)
-        self.sidebar.currentRowChanged.connect(self.switch_view)
+        # Sidebar
+        self.sidebar_buttons = []
+        self.sidebar = ft.Column(
+            controls=[],
+            width=250,
+            spacing=2,
+        )
         
-        # Content area with artist header
-        self.content_container = QWidget()
-        self.content_layout = QVBoxLayout(self.content_container)
-        self.content_layout.setContentsMargins(0, 0, 0, 0)
-        self.content_layout.setSpacing(0)
+        sidebar_items = ["Home", "Artists", "Albums", "Playlists"]
+        for i, item in enumerate(sidebar_items):
+            btn = ft.TextButton(
+                content=ft.Text(item),  # FIXED: Use content=ft.Text() instead of text=
+                style=ft.ButtonStyle(
+                    color="#b3b3b3",
+                    bgcolor=ft.Colors.TRANSPARENT,
+                    padding=ft.Padding.symmetric(vertical=15, horizontal=20),  # Keep as is
+                ),
+                data=i,
+                on_click=self.switch_view,
+            )
+            self.sidebar_buttons.append(btn)
+            self.sidebar.controls.append(btn)
         
-        # Artist header (hidden by default)
-        self.artist_header = ArtistHeader()
-        self.artist_header.setVisible(False)
-        self.content_layout.addWidget(self.artist_header)
+        # Set first button as active
+        self.sidebar_buttons[0].style.color = "#5DADE2"
         
-        # Stacked widget for different views
-        from ui.album_header import AlbumHeader
-        from ui.album_track_list import AlbumTrackList
-        self.content_stack = QStackedWidget()
-        self.home_view = LibraryGrid(self.show_album_detail)
-        self.artists_view = LibraryGrid(self.show_artist_albums)
-        self.albums_view = LibraryGrid(self.show_album_detail)
-        self.playlists_view = LibraryGrid(self.play_playlist)
-
-        # Album detail view (header + track list)
-        self.album_detail_widget = QWidget()
-        self.album_detail_layout = QVBoxLayout(self.album_detail_widget)
-        self.album_detail_layout.setContentsMargins(0, 0, 0, 0)
-        self.album_detail_layout.setSpacing(0)
-        self.album_header = AlbumHeader()
-        self.album_track_list = AlbumTrackList()
-        self.album_track_list.playTrackRequested.connect(self.play_track_by_id)
-        self.album_detail_layout.addWidget(self.album_header)
-        self.album_detail_layout.addWidget(self.album_track_list)
-
-        self.content_stack.addWidget(self.home_view)    # 0
-        self.content_stack.addWidget(self.artists_view) # 1
-        self.content_stack.addWidget(self.albums_view)  # 2
-        self.content_stack.addWidget(self.playlists_view) # 3
-        self.content_stack.addWidget(self.album_detail_widget) # 4
-
-        self.content_layout.addWidget(self.content_stack)
         
-        top_layout.addWidget(self.sidebar)
-        top_layout.addWidget(self.content_container)
-        self.main_layout.addLayout(top_layout)
-
-        # Enhanced player controls
+        # Create views
+        self.artist_header = ArtistHeader(visible=False)
+        
+        self.home_view = LibraryGrid(lambda album_id: asyncio.create_task(self.show_album_detail(album_id)))
+        self.artists_view = LibraryGrid(lambda artist_id: asyncio.create_task(self.show_artist_albums(artist_id)))
+        self.albums_view = LibraryGrid(lambda album_id: asyncio.create_task(self.show_album_detail(album_id)))
+        self.playlists_view = LibraryGrid(lambda playlist_id: asyncio.create_task(self.play_playlist(playlist_id)))
+        
+        # Current content view
+        self.current_view = self.home_view
+        
+        # Content container
+        self.content_container = ft.Container(
+            content=ft.Column(
+                controls=[
+                    self.artist_header,
+                    self.current_view,
+                ],
+                expand=True,
+            ),
+            expand=True,
+        )
+        
+        # Player controls
         self.controls = PlayerControls()
-        self.main_layout.addWidget(self.controls)
-        self.controls.play_btn.clicked.connect(self.toggle_play)
-        self.controls.next_btn.clicked.connect(self.play_next)
-        self.controls.prev_btn.clicked.connect(self.play_previous)
-        self.controls.volume_slider.valueChanged.connect(self.set_volume)
-        self.controls.shuffle_btn.clicked.connect(self.toggle_shuffle)
-        self.controls.repeat_btn.clicked.connect(self.toggle_repeat)
-        self.controls.progress.sliderPressed.connect(self.on_seek_start)
-        self.controls.progress.sliderReleased.connect(self.on_seek_end)
-
-    def handle_search(self, text):
-        if len(text) < 2: 
-            if self.sidebar.currentRow() == 0: self.load_home()
+        self.controls.play_btn.on_click = self.toggle_play
+        self.controls.next_btn.on_click = self.play_next
+        self.controls.prev_btn.on_click = self.play_previous
+        self.controls.volume_slider.on_change = self.set_volume
+        self.controls.shuffle_btn.on_click = self.toggle_shuffle
+        self.controls.repeat_btn.on_click = self.toggle_repeat
+        
+        # Main layout
+        body = ft.Row(
+            controls=[
+                ft.Container(
+                    content=self.sidebar,
+                    bgcolor="#000000",
+                    width=250,
+                ),
+                self.content_container,
+            ],
+            expand=True,
+        )
+        
+        self.page.add(
+            header,
+            body,
+            self.controls,
+        )
+    
+    async def handle_search(self, e):
+        text = e.control.value
+        if len(text) < 2:
+            if self.sidebar_buttons[0].content.value == "Home":  # FIXED: Access text via content.value
+                await self.load_home()
             return
-
+        
         self.home_view.clear()
-        self.artist_header.setVisible(False)
-        self.sidebar.setCurrentRow(0)
+        self.artist_header.visible = False
+        self.page.update()
         
         results = []
         query = text.lower()
@@ -187,72 +173,94 @@ class iBroadcastNative(QMainWindow):
         for i, res in enumerate(results[:30]):
             artwork = self.api.get_artwork_url(res[2])
             self.home_view.add_item(res[0], res[1], artwork, res[3], i // 5, i % 5)
-
-    def check_auth(self):
+        
+        self.page.update()
+    
+    async def check_auth(self):
         if self.api.access_token:
             res = self.api.load_library()
             if res.get('success'):
-                self.load_home()
+                await self.load_home()
         else:
-            self.controls.track_info.setText("Login Required...")
+            self.controls.set_track_info("Login Required...", "")
             auth_res = self.api.start_oauth_flow()
             if 'auth_url' in auth_res:
                 webbrowser.open(auth_res['auth_url'])
-                # Start polling for OAuth callback
-                self.oauth_poll_timer = QTimer()
-                self.oauth_poll_timer.setInterval(1000)
-                self.oauth_poll_timer.timeout.connect(self.poll_oauth_callback)
-                self.oauth_poll_timer.start()
-
-    def poll_oauth_callback(self):
-        status = self.api.check_callback_status()
-        if status.get('success') and 'code' in status:
-            self.oauth_poll_timer.stop()
-            token_res = self.api.exchange_code_for_token(status['code'])
-            if token_res.get('success'):
-                lib_res = self.api.load_library()
-                if lib_res.get('success'):
-                    self.load_home()
-                    self.controls.track_info.setText("")
+                # Poll for OAuth callback
+                asyncio.create_task(self.poll_oauth_callback())
+    
+    async def poll_oauth_callback(self):
+        while True:
+            status = self.api.check_callback_status()
+            if status.get('success') and 'code' in status:
+                token_res = self.api.exchange_code_for_token(status['code'])
+                if token_res.get('success'):
+                    lib_res = self.api.load_library()
+                    if lib_res.get('success'):
+                        await self.load_home()
+                        self.controls.set_track_info("", "")
+                        break
+                    else:
+                        self.controls.set_track_info("Failed to load library after login.", "")
+                        break
                 else:
-                    self.controls.track_info.setText("Failed to load library after login.")
+                    self.controls.set_track_info(f"Login failed: {token_res.get('message', 'Unknown error')}", "")
+                    break
+            elif not status.get('pending', False):
+                self.controls.set_track_info(f"Login failed: {status.get('message', 'Unknown error')}", "")
+                break
+            await asyncio.sleep(1)
+    
+    async def switch_view(self, e):
+        index = e.control.data
+        
+        # Update sidebar button colors
+        for i, btn in enumerate(self.sidebar_buttons):
+            if i == index:
+                btn.style.color = "#5DADE2"
             else:
-                self.controls.track_info.setText(f"Login failed: {token_res.get('message', 'Unknown error')}")
-        elif not status.get('pending', False):
-            self.oauth_poll_timer.stop()
-            self.controls.track_info.setText(f"Login failed: {status.get('message', 'Unknown error')}")
-
-    def switch_view(self, index):
-        self.content_stack.setCurrentIndex(index)
-        # Only hide artist header if not switching to albums for a specific artist
-        if not (index == 2 and hasattr(self, '_showing_artist_albums') and self._showing_artist_albums):
-            self.artist_header.setVisible(False)
-        self._showing_artist_albums = False
-
+                btn.style.color = "#b3b3b3"
+        
+        # Switch views
         if index == 0:
-            self.load_home()
+            self.current_view = self.home_view
+            await self.load_home()
         elif index == 1:
-            self.load_artists()
+            self.current_view = self.artists_view
+            await self.load_artists()
         elif index == 2:
-            self.load_albums()
+            self.current_view = self.albums_view
+            await self.load_albums()
         elif index == 3:
-            self.load_playlists()
-
-    def load_home(self):
+            self.current_view = self.playlists_view
+            await self.load_playlists()
+        
+        # Update content container
+        self.content_container.content.controls[1] = self.current_view
+        
+        if index != 2 or not self._showing_artist_albums:
+            self.artist_header.visible = False
+        
+        self._showing_artist_albums = False
+        self.page.update()
+    
+    async def load_home(self):
         self.home_view.clear()
         albums = list(self.api.library['albums'].items())[:30]
         for i, (aid, album) in enumerate(albums):
             artwork = self.api.get_artwork_url(album.get('artwork_id'))
             self.home_view.add_item(album.get('name'), "Album", artwork, aid, i // 5, i % 5)
-
-    def load_artists(self):
+        self.page.update()
+    
+    async def load_artists(self):
         self.artists_view.clear()
         artists = sorted(self.api.library['artists'].values(), key=lambda x: str(x.get('name', '')).lower())
         for i, artist in enumerate(artists):
             artwork = self.api.get_artwork_url(artist.get('artwork_id'))
             self.artists_view.add_item(artist.get('name', 'Unknown'), "Artist", artwork, artist.get('item_id'), i // 5, i % 5)
-
-    def load_albums(self, artist_id=None):
+        self.page.update()
+    
+    async def load_albums(self, artist_id=None):
         self.albums_view.clear()
         albums = self.api.library['albums'].values()
         if artist_id:
@@ -261,30 +269,13 @@ class iBroadcastNative(QMainWindow):
         for i, album in enumerate(albums_list):
             artwork = self.api.get_artwork_url(album.get('artwork_id'))
             self.albums_view.add_item(album.get('name'), "Album", artwork, album.get('item_id'), i // 5, i % 5)
-
-    def show_album_detail(self, album_id):
-        album = self.api.library['albums'].get(str(album_id)) or self.api.library['albums'].get(album_id)
-        if not album:
-            return
-        artist = self.api.library['artists'].get(album.get('artist_id'))
-        artist_name = artist.get('name', 'Unknown Artist') if artist else 'Unknown Artist'
-        year = album.get('year', '') or album.get('release_date', '')
-        artwork_url = self.api.get_artwork_url(album.get('artwork_id'))
-        self.album_header.set_album(album.get('name', 'Unknown Album'), artist_name, year, artwork_url)
-
-        # Get tracks for this album
-        tracks = [t for t in self.api.library['tracks'].values() if str(t.get('album_id')) == str(album.get('item_id'))]
-        tracks.sort(key=lambda x: x.get('track', 0))
-        self.album_track_list.set_tracks(tracks)
-
-        self.content_stack.setCurrentWidget(self.album_detail_widget)
-
-    def load_playlists(self):
+        self.page.update()
+    
+    async def load_playlists(self):
         self.playlists_view.clear()
         playlists = self.api.library.get('playlists', {})
         
         for i, (pid, pl) in enumerate(playlists.items()):
-            # Get artwork from first track in playlist
             artwork_url = ""
             tracks = pl.get('tracks', [])
             if tracks:
@@ -300,8 +291,39 @@ class iBroadcastNative(QMainWindow):
                 pid, 
                 i // 5, i % 5
             )
-
-    def show_artist_albums(self, artist_id):
+        self.page.update()
+    
+    async def show_album_detail(self, album_id):
+        album = self.api.library['albums'].get(str(album_id)) or self.api.library['albums'].get(album_id)
+        if not album:
+            return
+                
+        album_header = AlbumHeader()
+        album_track_list = AlbumTrackList(self.play_track_by_id)
+        
+        artist = self.api.library['artists'].get(album.get('artist_id'))
+        artist_name = artist.get('name', 'Unknown Artist') if artist else 'Unknown Artist'
+        year = album.get('year', '') or album.get('release_date', '')
+        artwork_url = self.api.get_artwork_url(album.get('artwork_id'))
+        
+        album_header.set_album(album.get('name', 'Unknown Album'), artist_name, year, artwork_url)
+        
+        tracks = [t for t in self.api.library['tracks'].values() if str(t.get('album_id')) == str(album.get('item_id'))]
+        tracks.sort(key=lambda x: x.get('track', 0))
+        album_track_list.set_tracks(tracks)
+        
+        album_detail = ft.Column(
+            controls=[album_header, album_track_list],
+            expand=True,
+        )
+        
+        # Replace current view with album detail
+        self.current_view = album_detail
+        self.content_container.content.controls[1] = album_detail
+        self.artist_header.visible = False
+        self.page.update()
+    
+    async def show_artist_albums(self, artist_id):
         artist = None
         for a in self.api.library['artists'].values():
             if str(a.get('item_id')) == str(artist_id):
@@ -313,30 +335,33 @@ class iBroadcastNative(QMainWindow):
                 artist.get('name', 'Unknown Artist'),
                 self.api.get_artwork_url(artist.get('artwork_id'))
             )
-            print("Showing albums for artist:", artist.get('name'))
-            self.artist_header.setVisible(True)
-        else:
-            print("Artist not found")
-            self.artist_header.setVisible(False)
-
+            self.artist_header.visible = True
+        
         self._showing_artist_albums = True
-        self.sidebar.setCurrentRow(2)
-        self.load_albums(artist_id)
-
-    def play_playlist(self, playlist_id):
+        
+        # Switch to albums view for this artist
+        self.sidebar_buttons[2].style.color = "#5DADE2"
+        self.sidebar_buttons[0].style.color = "#b3b3b3"
+        self.sidebar_buttons[1].style.color = "#b3b3b3"
+        self.sidebar_buttons[3].style.color = "#b3b3b3"
+        
+        self.current_view = self.albums_view
+        self.content_container.content.controls[1] = self.albums_view
+        await self.load_albums(artist_id)
+        self.page.update()
+    
+    async def play_playlist(self, playlist_id):
         pl = self.api.library['playlists'].get(playlist_id)
         if pl and pl.get('tracks'):
             track_ids = pl['tracks']
             self.current_queue = track_ids
             self.current_index = 0
-            self.play_track_by_id(track_ids[0])
-
-    def play_album(self, album_id):
-        # For compatibility, just show album detail
-        self.show_album_detail(album_id)
-
-    def play_track_by_id(self, track_id):
-        print("Playing track ID:", track_id)
+            await self.play_track_by_id(track_ids[0])
+    
+    async def play_album(self, album_id):
+        await self.show_album_detail(album_id)
+    
+    async def play_track_by_id(self, track_id):
         track = None
         artist = None
         for tr in self.api.library['tracks'].values():
@@ -351,34 +376,48 @@ class iBroadcastNative(QMainWindow):
 
         if track:
             url = self.api.get_stream_url(track_id)
-            print(url)
-            self.media_player.setSource(QUrl(url))
-            self.media_player.play()
+            self.audio.src = url
+            self.audio.autoplay = True
+            self.audio.update()
             
             track_name = track.get('title', 'Unknown Track')
-
             artist_name = artist.get('name', 'Unknown Artist') if artist else 'Unknown Artist'
             artwork_url = self.api.get_artwork_url(track.get('artwork_id'))
             
             self.controls.set_track_info(track_name, artist_name, artwork_url)
             self.controls.set_playing(True)
-
-    def toggle_play(self):
-        if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
-            self.media_player.pause()
+            self.is_playing = True
+            self.current_track_id = track_id
+    
+    async def toggle_play(self, e):
+        if self.is_playing:
+            # Pause audio
+            self.audio.autoplay = False
+            # Check if the Audio control has a pause method
+            if hasattr(self.audio, 'pause'):
+                self.audio.pause()
+            self.is_playing = False
             self.controls.set_playing(False)
         else:
-            self.media_player.play()
+            # Resume playing
+            self.audio.autoplay = True
+            if hasattr(self.audio, 'resume'):
+                self.audio.resume()
+            if self.current_track_id:
+                await self.play_track_by_id(self.current_track_id)
+            self.is_playing = True
             self.controls.set_playing(True)
-
-    def play_next(self):
+        await self.audio.update_async()
+        self.page.update()
+    
+    async def play_next(self, e):
         if not self.current_queue:
             return
             
         if self.repeat_mode == "one":
             # Replay current track
-            self.media_player.setPosition(0)
-            self.media_player.play()
+            if self.current_track_id:
+                await self.play_track_by_id(self.current_track_id)
             return
         
         self.current_index += 1
@@ -387,66 +426,43 @@ class iBroadcastNative(QMainWindow):
             if self.repeat_mode == "all":
                 self.current_index = 0
             else:
-                self.media_player.stop()
+                self.is_playing = False
                 self.controls.set_playing(False)
+                self.page.update()
                 return
         
-        self.play_track_by_id(self.current_queue[self.current_index])
-
-    def play_previous(self):
+        await self.play_track_by_id(self.current_queue[self.current_index])
+    
+    async def play_previous(self, e):
         if not self.current_queue:
             return
         
         # If more than 3 seconds into track, restart it
-        if self.media_player.position() > 3000:
-            self.media_player.setPosition(0)
-            return
-        
         self.current_index -= 1
         if self.current_index < 0:
             self.current_index = len(self.current_queue) - 1 if self.repeat_mode == "all" else 0
         
-        self.play_track_by_id(self.current_queue[self.current_index])
-
-    def toggle_shuffle(self):
+        await self.play_track_by_id(self.current_queue[self.current_index])
+    
+    async def toggle_shuffle(self, e):
         self.shuffle_enabled = not self.shuffle_enabled
         self.controls.set_shuffle(self.shuffle_enabled)
-        # TODO: Implement shuffle logic for queue
-
-    def toggle_repeat(self):
+        self.page.update()
+    
+    async def toggle_repeat(self, e):
         modes = ["off", "all", "one"]
         current_idx = modes.index(self.repeat_mode)
         self.repeat_mode = modes[(current_idx + 1) % len(modes)]
         self.controls.set_repeat(self.repeat_mode)
+        self.page.update()
+    
+    async def set_volume(self, e):
+        volume = e.control.value / 100
+        self.audio.volume = volume
+        await self.audio.update_async()
 
-    def set_volume(self, value):
-        self.audio_output.setVolume(value / 100)
-
-    def on_seek_start(self):
-        self.timer.stop()
-
-    def on_seek_end(self):
-        if self.media_player.duration() > 0:
-            position = (self.controls.progress.value() / 100) * self.media_player.duration()
-            self.media_player.setPosition(int(position))
-        self.timer.start(1000)
-
-    def update_position(self):
-        if self.media_player.duration() > 0:
-            pos = (self.media_player.position() / self.media_player.duration()) * 100
-            self.controls.progress.setValue(int(pos))
-            
-            # Update time labels
-            current = self.media_player.position() // 1000
-            total = self.media_player.duration() // 1000
-            self.controls.update_time_labels(current, total)
-
-    def on_media_status_changed(self, status):
-        if status == QMediaPlayer.MediaStatus.EndOfMedia:
-            self.play_next()
+def main(page: ft.Page):
+    app = iBroadcastFlet(page)
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = iBroadcastNative()
-    window.show()
-    sys.exit(app.exec())
+    ft.run(main)
