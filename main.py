@@ -8,7 +8,7 @@ from PyQt6.QtGui import QAction
 
 from api.ibroadcast_api import iBroadcastAPI
 from api.queue_cache import QueueCache
-from api.lastfm_api import LastFMAPI  # NEW
+from api.lastfm_api import LastFMAPI
 
 from ui.search_header import SearchHeader
 from ui.sidebar_navigation import SidebarNavigation
@@ -19,14 +19,14 @@ from ui.album_detail_view import AlbumDetailView
 from ui.playlist_detail_view import PlaylistDetailView
 from ui.queue_sidebar import QueueSidebar
 from ui.context_menus import TrackContextMenu
-from ui.options_dialog import OptionsDialog  # NEW
+from ui.options_dialog import OptionsDialog
 
 class iBroadcastNative(QMainWindow):
     def __init__(self):
         super().__init__()
         self.api = iBroadcastAPI()
         self.queue_cache = QueueCache()
-        self.lastfm = LastFMAPI()  # NEW
+        self.lastfm = LastFMAPI()
         self.media_player = QMediaPlayer()
         self.audio_output = QAudioOutput()
         self.media_player.setAudioOutput(self.audio_output)
@@ -39,10 +39,7 @@ class iBroadcastNative(QMainWindow):
         self.current_album_id = None
         self.current_playlist_id = None
         
-        # Last.fm scrobbling tracking - NEW
-        self.track_start_time = None
         self.track_duration = 0
-        self.scrobbled = False
         self.current_track_info = {}
         
         # Timer for updating queue cache position
@@ -55,6 +52,7 @@ class iBroadcastNative(QMainWindow):
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_position)
         self.timer.start(1000)
+        self.is_seeking = False
         
         self.media_player.mediaStatusChanged.connect(self.on_media_status_changed)
         self.media_player.playbackStateChanged.connect(self.on_playback_state_changed)  # NEW
@@ -92,25 +90,28 @@ class iBroadcastNative(QMainWindow):
         content_layout.setSpacing(0)
         
         self.artist_header = ArtistHeader()
-        self.artist_header.setVisible(False)
+        self._showing_artist_albums = False
+        self.artist_header.setVisible(self._showing_artist_albums)
         content_layout.addWidget(self.artist_header)
         
         self.content_stack = QStackedWidget()
-        self.home_view = LibraryGrid(self.show_album_detail)
         self.artists_view = LibraryGrid(self.show_artist_albums)
         self.albums_view = LibraryGrid(self.show_album_detail)
         self.playlists_view = LibraryGrid(self.show_playlist_detail)
         self.album_detail_view = AlbumDetailView()
         self.album_detail_view.playTrackRequested.connect(self.play_track_from_album)
+        self.album_detail_view.upButtonClicked.connect(self.show_artist_albums)
         self.playlist_detail_view = PlaylistDetailView()
         self.playlist_detail_view.playTrackRequested.connect(self.play_track_from_playlist)
+        self.playlist_detail_view.upButtonClicked.connect(self.load_playlists)
+        self.search_results_view = LibraryGrid(self.handle_search_result_click)
 
-        self.content_stack.addWidget(self.home_view)
         self.content_stack.addWidget(self.artists_view)
         self.content_stack.addWidget(self.albums_view)
         self.content_stack.addWidget(self.playlists_view)
         self.content_stack.addWidget(self.album_detail_view)
         self.content_stack.addWidget(self.playlist_detail_view)
+        self.content_stack.addWidget(self.search_results_view)
 
         content_layout.addWidget(self.content_stack)
         
@@ -146,25 +147,37 @@ class iBroadcastNative(QMainWindow):
         self.controls.repeat_btn.clicked.connect(self.toggle_repeat)
         self.controls.progress.sliderPressed.connect(self.on_seek_start)
         self.controls.progress.sliderReleased.connect(self.on_seek_end)
+        self.controls.progress.valueChanged.connect(self.on_seek_progress)
+
+    def handle_search_result_click(self, item_id):
+        # Try to find the item in artists, albums, or tracks
+        if item_id in self.api.library['artists']:
+            self.show_artist_albums(item_id)
+        elif item_id in self.api.library['albums']:
+            self.show_album_detail(item_id)
+        elif item_id in self.api.library['tracks']:
+            track = self.api.library['tracks'][item_id]
+            self.play_track_by_id(item_id)
 
     def create_menu_bar(self):
         """Create the menu bar - NEW"""
         menubar = self.menuBar()
         
         # File menu
-        file_menu = menubar.addMenu("&File")
-        
-        options_action = QAction("&Options", self)
-        options_action.setShortcut("Ctrl+,")
-        options_action.triggered.connect(self.show_options)
-        file_menu.addAction(options_action)
-        
-        file_menu.addSeparator()
-        
-        exit_action = QAction("E&xit", self)
-        exit_action.setShortcut("Ctrl+Q")
-        exit_action.triggered.connect(self.close)
-        file_menu.addAction(exit_action)
+        if menubar is not None:
+            file_menu = menubar.addMenu("&File")
+            if file_menu is not None:
+                options_action = QAction("&Options", self)
+                options_action.setShortcut("Ctrl+,")
+                options_action.triggered.connect(self.show_options)
+                file_menu.addAction(options_action)
+                
+                file_menu.addSeparator()
+                
+                exit_action = QAction("E&xit", self)
+                exit_action.setShortcut("Ctrl+Q")
+                exit_action.triggered.connect(self.close)
+                file_menu.addAction(exit_action)
     
     def show_options(self):
         """Show the options dialog - NEW"""
@@ -177,7 +190,7 @@ class iBroadcastNative(QMainWindow):
         if row < 0:
             return
         
-        menu = TrackContextMenu(self)
+        menu = TrackContextMenu(self, is_playlist=False)
         menu.play_action.triggered.connect(lambda: self.play_track_from_album_at_row(row))
         menu.add_next_action.triggered.connect(lambda: self.add_track_to_queue_from_album(row, after_current=True))
         menu.add_end_action.triggered.connect(lambda: self.add_track_to_queue_from_album(row, after_current=False))
@@ -192,49 +205,63 @@ class iBroadcastNative(QMainWindow):
         if row < 0:
             return
         
-        menu = TrackContextMenu(self)
+        menu = TrackContextMenu(self, is_playlist=True)
         menu.play_action.triggered.connect(lambda: self.play_track_from_playlist_at_row(row))
         menu.add_next_action.triggered.connect(lambda: self.add_track_to_queue_from_playlist(row, after_current=True))
         menu.add_end_action.triggered.connect(lambda: self.add_track_to_queue_from_playlist(row, after_current=False))
+        menu.go_to_album_action.triggered.connect(lambda: self._go_to_album_from_playlist_row(row))
         
         viewport = table.viewport()
         if viewport:
             menu.exec(viewport.mapToGlobal(pos))
+            
+
+    def _go_to_album_from_playlist_row(self, row):
+        if not hasattr(self, '_current_playlist_tracks') or row >= len(self._current_playlist_tracks):
+            return
+        track_id = self._current_playlist_tracks[row]
+        track = self.api.library['tracks'].get(int(track_id))
+        if track:
+            album_id = track.get('album_id')
+            if album_id:
+                self.show_album_detail(album_id)
     
+    
+
     def handle_search(self, text):
-        if len(text) < 2: 
+        if len(text) < 2:
             if self.sidebar.currentRow() == 0:
-                self.load_home()
+                self.load_artists()
+            self.content_stack.setCurrentWidget(self.artists_view)
             return
 
-        self.home_view.clear()
         self.artist_header.setVisible(False)
-        self.sidebar.setCurrentRow(0)
-        
+
         results = []
         query = text.lower()
 
-        for aid, artist in self.api.library['artists'].items():
+        for aid, artist in self.api.library['albumartists'].items():
             if query in str(artist.get('name', '')).lower():
-                results.append((artist.get('name'), "Artist", artist.get('artwork_id'), aid))
+                results.append((artist.get('name'), "Artist", self.api.get_artwork_url(artist.get('artwork_id')), aid))
 
         for aid, album in self.api.library['albums'].items():
             if query in str(album.get('name', '')).lower():
-                results.append((album.get('name'), "Album", album.get('artwork_id'), aid))
+                results.append((album.get('name'), "Album", self.api.get_artwork_url(album.get('artwork_id')), aid))
 
         for tid, track in self.api.library['tracks'].items():
             if query in str(track.get('title', '')).lower():
-                results.append((track.get('title'), "Song", track.get('artwork_id') or '', tid))
+                results.append((track.get('title'), "Song", self.api.get_artwork_url(track.get('artwork_id')), tid))
 
-        for i, res in enumerate(results[:50]):
-            artwork = self.api.get_artwork_url(res[2])
-            self.home_view.add_item(res[0], res[1], artwork, res[3])
+        self.search_results_view.clear()
+        for title, subtitle, image_url, item_id in results:
+            self.search_results_view.add_item(title, subtitle, image_url, item_id)
+        self.content_stack.setCurrentWidget(self.search_results_view)
 
     def check_auth(self):
         if self.api.access_token:
             res = self.api.load_library()
             if res.get('success'):
-                self.load_home()
+                self.load_artists()
                 self.restore_queue_from_cache()
         else:
             self.controls.track_info.setText("Login Required...")
@@ -254,7 +281,7 @@ class iBroadcastNative(QMainWindow):
             if token_res.get('success'):
                 lib_res = self.api.load_library()
                 if lib_res.get('success'):
-                    self.load_home()
+                    self.load_artists()
                     self.controls.track_info.setText("")
                     self.restore_queue_from_cache()
                 else:
@@ -267,40 +294,37 @@ class iBroadcastNative(QMainWindow):
 
     def switch_view(self, index):
         self.content_stack.setCurrentIndex(index)
-        if not (index == 2 and hasattr(self, '_showing_artist_albums') and self._showing_artist_albums):
-            self.artist_header.setVisible(False)
+        self.current_album_id = None
         self._showing_artist_albums = False
 
         if index == 0:
-            self.load_home()
-        elif index == 1:
             self.load_artists()
-        elif index == 2:
+        elif index == 1:
             self.load_albums()
-        elif index == 3:
+        elif index == 2:
             self.load_playlists()
 
-    def load_home(self):
-        self.home_view.clear()
-        albums = list(self.api.library['albums'].items())[:50]
-        for i, (aid, album) in enumerate(albums):
-            artwork = self.api.get_artwork_url(album.get('artwork_id'))
-            self.home_view.add_item(album.get('name'), "Album", artwork, aid)
 
     def load_artists(self):
+        self.content_stack.setCurrentWidget(self.artists_view)
+        self.artist_header.setVisible(self._showing_artist_albums)
         self.artists_view.clear()
         artists = sorted(self.api.library['albumartists'].values(), key=lambda x: str(x.get('name', '')).lower())
-
         for artist in artists:
             artwork = self.api.get_artwork_url(artist.get('artwork_id'))
             self.artists_view.add_item(artist.get('name', 'Unknown'), "Artist", artwork, artist.get('item_id'))
 
     def load_albums(self, artist_id=None):
+        self.content_stack.setCurrentWidget(self.albums_view)
+        self.artist_header.setVisible(self._showing_artist_albums)
         self.albums_view.clear()
         albums = self.api.library['albums'].values()
         if artist_id:
-            albums = [a for a in albums if str(a.get('artist_id')) == str(artist_id)]
+            albums = [a for a in albums if int(a.get('artist_id')) == int(artist_id)]
         albums_list = list(albums)
+        if artist_id:
+            albums_list.sort(key=lambda x: (x.get('year') or '', str(x.get('name', '')).lower()))
+        print(albums_list)
         for album in albums_list:
             artwork = self.api.get_artwork_url(album.get('artwork_id'))
             self.albums_view.add_item(album.get('name'), "Album", artwork, album.get('item_id'))
@@ -319,15 +343,18 @@ class iBroadcastNative(QMainWindow):
         year = album.get('year', '') or album.get('release_date', '')
         artwork_url = self.api.get_artwork_url(album.get('artwork_id'))
         
+        self.album_detail_view.set_artist_id(int(album.get('artist_id')))
         self.album_detail_view.set_album(album.get('name', 'Unknown Album'), artist_name, year, artwork_url)
-
-        tracks = [t for t in self.api.library['tracks'].values() if str(t.get('album_id')) == str(album.get('item_id'))]
+        
+        tracks = [t for t in self.api.library['tracks'].values() if int(t.get('album_id')) == int(album.get('item_id'))]
         tracks.sort(key=lambda x: x.get('track', 0))
         self.album_detail_view.set_tracks(tracks)
         
         self._current_album_tracks = [t.get('item_id') for t in tracks]
         self.content_stack.setCurrentWidget(self.album_detail_view)
-        self.artist_header.setVisible(False)
+        self._showing_artist_albums=False
+        self.artist_header.setVisible(self._showing_artist_albums)
+        self.artist_header.upButtonClicked.connect(self.load_artists)
     
     def show_playlist_detail(self, playlist_id):
         self.current_playlist_id = playlist_id
@@ -363,9 +390,9 @@ class iBroadcastNative(QMainWindow):
         self.content_stack.setCurrentWidget(self.playlist_detail_view)
 
     def load_playlists(self):
+        self.content_stack.setCurrentWidget(self.playlists_view)
         self.playlists_view.clear()
         playlists = self.api.library.get('playlists', {})
-        
         for pid, pl in playlists.items():
             artwork_url = ""
             tracks = pl.get('tracks', [])
@@ -374,7 +401,6 @@ class iBroadcastNative(QMainWindow):
                 first_track = self.api.library['tracks'].get(int(first_track_id))
                 if first_track and first_track.get('artwork_id'):
                     artwork_url = self.api.get_artwork_url(first_track['artwork_id'])
-            
             self.playlists_view.add_item(
                 pl.get('name', 'Untitled Playlist'), 
                 f"{len(tracks)} tracks", 
@@ -384,8 +410,8 @@ class iBroadcastNative(QMainWindow):
 
     def show_artist_albums(self, artist_id):
         artist = None
-        for a in self.api.library['artists'].values():
-            if str(a.get('item_id')) == str(artist_id):
+        for a in self.api.library['albumartists'].values():
+            if int(a.get('item_id')) == int(artist_id):
                 artist = a
                 break
 
@@ -394,12 +420,11 @@ class iBroadcastNative(QMainWindow):
                 artist.get('name', 'Unknown Artist'),
                 self.api.get_artwork_url(artist.get('artwork_id'))
             )
-            self.artist_header.setVisible(True)
+            self._showing_artist_albums = True
+            self.content_stack.setCurrentWidget(self.albums_view)
         else:
-            self.artist_header.setVisible(False)
+            self._showing_artist_albums = False
 
-        self._showing_artist_albums = True
-        self.sidebar.setCurrentRow(2)
         self.load_albums(artist_id)
 
     def play_track_from_album(self, track_id):
@@ -494,16 +519,16 @@ class iBroadcastNative(QMainWindow):
         artist = None
         album = None
         for tr in self.api.library['tracks'].values():
-            if str(tr.get('item_id')) == str(track_id):
+            if int(tr.get('item_id')) == int(track_id):
                 track = tr
                 break
         if track:
             for ar in self.api.library['artists'].values():
-                if str(ar.get('item_id')) == str(track.get('artist_id')):
+                if int(ar.get('item_id')) == int(track.get('artist_id')):
                     artist = ar
                     break
             for al in self.api.library['albums'].values():
-                if str(al.get('item_id')) == str(track.get('album_id')):
+                if int(al.get('item_id')) == int(track.get('album_id')):
                     album = al
                     break
 
@@ -513,11 +538,7 @@ class iBroadcastNative(QMainWindow):
             self.media_player.play()
             
             self.current_track_id = track_id
-            
-            # Reset scrobbling state for new/repeated track - IMPORTANT!
-            self.scrobbled = False
-            self.track_start_time = None  # Will be set when playback actually starts
-            
+                        
             # Store track info for Last.fm scrobbling
             self.current_track_info = {
                 'artist': artist.get('name', 'Unknown Artist') if artist else 'Unknown Artist',
@@ -539,61 +560,45 @@ class iBroadcastNative(QMainWindow):
 
     def on_playback_state_changed(self, state):
         """Handle playback state changes for Last.fm"""
-        import time
         if state == QMediaPlayer.PlaybackState.PlayingState:
-            if self.track_start_time is None:
-                self.track_start_time = time.time()
-                # Update Now Playing on Last.fm
-                if self.lastfm.is_authenticated() and self.current_track_info:
-                    result = self.lastfm.update_now_playing(
-                        self.current_track_info['artist'],
-                        self.current_track_info['track'],
-                        self.current_track_info.get('album')
-                    )
-                    if result['success']:
-                        print(f"Now Playing updated: {self.current_track_info['track']} by {self.current_track_info['artist']}")
-                    else:
-                        print(f"Failed to update Now Playing: {result.get('message', 'Unknown error')}")
+            if self.lastfm.is_authenticated() and self.current_track_info:
+                self.lastfm.update_now_playing(
+                    self.current_track_info['artist'],
+                    self.current_track_info['track'],
+                    self.current_track_info.get('album')
+                )
 
     def check_scrobble_conditions(self):
         """Check if we should scrobble the current track"""
-        import time
-        if self.scrobbled or not self.lastfm.is_authenticated():
-            return
-        
-        if not self.current_track_info or not self.track_start_time:
-            return
-        
-        # Calculate how long the track has been playing
-        elapsed = time.time() - self.track_start_time
-        
-        # Scrobble if:
-        # 1. Track has been playing for at least 30% of its duration, OR
-        # 2. Track has been playing for at least 4 minutes (240 seconds)
-        threshold = max(self.track_duration * 0.3, 240) if self.track_duration > 0 else 240
-        
-        if elapsed >= threshold:
-            self.scrobble_track()
-
-    def scrobble_track(self):
-        """Scrobble the current track to Last.fm"""
-        if self.scrobbled or not self.lastfm.is_authenticated():
+        if not self.lastfm.is_authenticated():
             return
         
         if not self.current_track_info:
             return
         
-        result = self.lastfm.scrobble(
+        if self.media_player.duration() > 0:
+            progress = self.media_player.position() / self.media_player.duration()
+            seconds_played = self.media_player.position() / 1000.0
+            if progress >= 0.3 or seconds_played >= 240:
+                self.scrobble_track()
+
+    def scrobble_track(self):
+        """Scrobble the current track to Last.fm"""
+        if not self.lastfm.is_authenticated():
+            return
+        
+        if not self.current_track_info:
+            return
+        
+        if self.current_track_info.get('scrobbled', False):
+            return 
+        
+        self.lastfm.scrobble(
             self.current_track_info['artist'],
             self.current_track_info['track'],
             self.current_track_info.get('album')
         )
-        
-        if result['success']:
-            self.scrobbled = True
-            print(f"Scrobbled: {self.current_track_info['track']} by {self.current_track_info['artist']}")
-        else:
-            print(f"Failed to scrobble: {result.get('message', 'Unknown error')}")
+        self.current_track_info['scrobbled'] = True
 
     def toggle_play(self):
         if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
@@ -608,6 +613,7 @@ class iBroadcastNative(QMainWindow):
         self.check_scrobble_conditions()
         
         if self.repeat_mode == "one":
+            self.current_track_info['scrobbled'] = False
             self.media_player.setPosition(0)
             self.media_player.play()
             return
@@ -648,23 +654,36 @@ class iBroadcastNative(QMainWindow):
         self.audio_output.setVolume(value / 100)
 
     def on_seek_start(self):
+        self.is_seeking = True
         self.timer.stop()
 
     def on_seek_end(self):
         if self.media_player.duration() > 0:
             position = (self.controls.progress.value() / 100) * self.media_player.duration()
             self.media_player.setPosition(int(position))
+            # Update time labels to reflect the seeked position immediately
+            current = int(position) // 1000
+            total = self.media_player.duration() // 1000
+            self.controls.update_time_labels(current, total)
+        self.is_seeking = False
         self.timer.start(1000)
 
+    def on_seek_progress(self, value):
+        if self.is_seeking and self.media_player.duration() > 0:
+            position = (value / 100) * self.media_player.duration()
+            current = int(position) // 1000
+            total = self.media_player.duration() // 1000
+            self.controls.update_time_labels(current, total)
+
     def update_position(self):
+        if self.is_seeking:
+            return
         if self.media_player.duration() > 0:
             pos = (self.media_player.position() / self.media_player.duration()) * 100
             self.controls.progress.setValue(int(pos))
-            
             current = self.media_player.position() // 1000
             total = self.media_player.duration() // 1000
             self.controls.update_time_labels(current, total)
-            
             # Check if we should scrobble
             self.check_scrobble_conditions()
 

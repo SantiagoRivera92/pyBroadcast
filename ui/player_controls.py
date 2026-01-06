@@ -14,7 +14,7 @@ class SvgButton(QPushButton):
         self.icon_size = size
         self.default_color = "#b3b3b3"
         self.hover_color = "#ffffff"
-        self.active_color = "#5DADE2"
+        self.active_color = "#4DA6FF"  # Updated active color to brighter blue
         self.current_color = self.default_color
         self.is_active = False
         
@@ -77,7 +77,7 @@ class PlayerControls(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(110)
-        self.setStyleSheet("background-color: #181818; border-top: 1px solid #282828;")
+        self.setStyleSheet("background: none; border-top: 1px solid #282828;")
         layout = QHBoxLayout(self)
         layout.setContentsMargins(15, 10, 15, 10)
         
@@ -86,7 +86,7 @@ class PlayerControls(QFrame):
         
         self.artwork = QLabel()
         self.artwork.setFixedSize(70, 70)
-        self.artwork.setStyleSheet("background-color: #181818; background-color: #282828; border-radius: 4px;")
+        self.artwork.setStyleSheet("background: none; background-color: #282828; border-radius: 4px;")
         self.artwork.setScaledContents(True)
         left_layout.addWidget(self.artwork)
         
@@ -95,11 +95,11 @@ class PlayerControls(QFrame):
         info_layout.setSpacing(2)
         self.track_name = ScrollingLabel(info_widget)
         self.track_name.setText("No track playing")
-        self.track_name.setStyleSheet("color: white; font-weight: bold; font-size: 15px;")
+        self.track_name.setStyleSheet("background: transparent; color: white; font-weight: bold; font-size: 15px; border: none; padding: 0;")
         self.track_name.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         self.artist_name = ScrollingLabel(info_widget)
         self.artist_name.setText("")
-        self.artist_name.setStyleSheet("color: #b3b3b3; font-size: 13px;")
+        self.artist_name.setStyleSheet("background: transparent; color: #b3b3b3; font-size: 13px; border: none; padding: 0;")
         self.artist_name.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         info_layout.addWidget(self.track_name)
         info_layout.addWidget(self.artist_name)
@@ -153,7 +153,7 @@ class PlayerControls(QFrame):
         progress_layout.setSpacing(10)
         
         self.time_current = QLabel("0:00")
-        self.time_current.setStyleSheet("color: #b3b3b3; font-size: 11px; min-width: 40px;")
+        self.time_current.setStyleSheet("background: transparent; color: #b3b3b3; font-size: 11px; min-width: 40px; border: none; padding: 0;")
         
         self.progress = QSlider(Qt.Orientation.Horizontal)
         self.progress.setStyleSheet("""
@@ -176,7 +176,7 @@ class PlayerControls(QFrame):
         """)
         
         self.time_total = QLabel("0:00")
-        self.time_total.setStyleSheet("color: #b3b3b3; font-size: 11px; min-width: 40px;")
+        self.time_total.setStyleSheet("background: transparent; color: #b3b3b3; font-size: 11px; min-width: 40px; border: none; padding: 0;")
         
         progress_layout.addWidget(self.time_current)
         progress_layout.addWidget(self.progress, 1)

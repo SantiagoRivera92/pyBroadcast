@@ -1,17 +1,19 @@
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QLabel
-from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QLabel, QPushButton
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap, QImage
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PyQt6.QtCore import QUrl
 
 class AlbumHeader(QFrame):
+    upButtonClicked = pyqtSignal(object)
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(280)
         self.setStyleSheet("""
             AlbumHeader {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #1a1a1a, stop:1 #121212);
+                    stop:0 #1a1a1a, stop:1 #0f0f0f);
                 border: none;
             }
         """)
@@ -25,8 +27,8 @@ class AlbumHeader(QFrame):
         self.artwork.setFixedSize(180, 180)
         self.artwork.setStyleSheet("""
             QLabel {
-                background-color: #282828; 
-                border-radius: 16px;
+                background-color: #1a1a1a; AlbumHeader
+                border-radius: 12px;
             }
         """)
         self.artwork.setScaledContents(True)
@@ -45,11 +47,11 @@ class AlbumHeader(QFrame):
         album_type_label.setFixedHeight(20)
         album_type_label.setStyleSheet("""
             QLabel {
-                color: white; 
+                color: #4DA6FF; 
                 font-size: 13px; 
                 font-weight: bold;
                 letter-spacing: 2px;
-                background: transparent;
+                background: none;
                 padding: 0px;
                 border: none;
             }
@@ -65,7 +67,7 @@ class AlbumHeader(QFrame):
                 color: white; 
                 font-size: 48px; 
                 font-weight: bold;
-                background: transparent;
+                background: none;
                 padding: 0px;
                 border: none;
             }
@@ -80,7 +82,7 @@ class AlbumHeader(QFrame):
             QLabel {
                 color: #b3b3b3; 
                 font-size: 20px;
-                background: transparent;
+                background: none;
                 padding: 0px;
                 border: none;
             }
@@ -95,7 +97,7 @@ class AlbumHeader(QFrame):
             QLabel {
                 color: #b3b3b3; 
                 font-size: 16px;
-                background: transparent;
+                background: none;
                 padding: 0px;
                 border: none;
             }
@@ -111,8 +113,30 @@ class AlbumHeader(QFrame):
 
         layout.addWidget(info_container)
         layout.addStretch()
+        
+        self.up_button = QPushButton("↑ Artist")
+        self.up_button.setStyleSheet("""
+            QPushButton {
+                background-color: #1a1a1a;
+                color: #4DA6FF;
+                border: 1px solid #2a2a2a;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-weight: bold;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                background-color: #252525;
+                border: 1px solid #4DA6FF;
+            }
+        """)
+        self.up_button.setFixedHeight(40)
+        layout.addWidget(self.up_button)
 
         self.network_manager = QNetworkAccessManager()
+        
+    def set_artist_id(self, artist_id):
+        self.up_button.clicked.connect(lambda: self.upButtonClicked.emit(artist_id))
 
     def set_album(self, name, artist, year, artwork_url=None):
         self.album_name.setText(name)
@@ -140,6 +164,6 @@ class AlbumHeader(QFrame):
                     Qt.TransformationMode.SmoothTransformation
                 )
                 self.artwork.setPixmap(scaled)
-                self.artwork.setStyleSheet("QLabel { background-color: transparent; border-radius: 16px; }")
+                self.artwork.setStyleSheet("QLabel { background-color: transparent; border-radius: 12px; }")
         
         reply.deleteLater()

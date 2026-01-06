@@ -127,7 +127,6 @@ class QueueSidebar(QFrame):
         self.setStyleSheet("""
             QFrame {
                 background-color: #000000;
-                border-left: 1px solid #282828;
             }
         """)
         
@@ -142,7 +141,7 @@ class QueueSidebar(QFrame):
         header_layout.setContentsMargins(20, 0, 20, 0)
         
         title = QLabel("Play Queue")
-        title.setStyleSheet("color: white; font-size: 18px; font-weight: bold;")
+        title.setStyleSheet("color: white; font-size: 18px; font-weight: bold; margin-left: 4px;")
         header_layout.addWidget(title)
         
         header_layout.addStretch()
@@ -202,7 +201,6 @@ class QueueSidebar(QFrame):
     def _on_item_clicked(self, item):
         widget = self.queue_list.itemWidget(item)
         if isinstance(widget, QueueItem):
-            print(f"Queue sidebar: Play track requested at index {widget.index}")
             self.playTrackRequested.emit(widget.index - 1)
     
     def _on_rows_moved(self, parent, start, end, destination, row):
@@ -217,7 +215,6 @@ class QueueSidebar(QFrame):
         Set the queue display. 
         For the new system, tracks_data includes both current and upcoming tracks.
         """
-        print(f"Queue sidebar: Setting queue with {len(tracks_data)} tracks")
         self.tracks_data = tracks_data
         self.current_index = current_index
         
@@ -227,9 +224,7 @@ class QueueSidebar(QFrame):
         for i, track in enumerate(tracks_data):
             is_current = track.get('is_current', False)
             self._add_track_item(track, i, is_current)
-        
-        print(f"Queue sidebar: Added {self.queue_list.count()} items to display")
-    
+            
     def _add_track_item(self, track, index, is_current):
         item = QListWidgetItem(self.queue_list)
         

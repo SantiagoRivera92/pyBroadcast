@@ -9,9 +9,9 @@ class LibraryGrid(QScrollArea):
     def __init__(self, item_click_callback):
         super().__init__()
         self.setWidgetResizable(True)
-        self.setStyleSheet("QScrollArea { border: none; background-color: #121212; }")
+        self.setStyleSheet("QScrollArea { border: none; background-color: #0f0f0f; }")
         self.container = QWidget()
-        self.container.setStyleSheet("background-color: #121212;")
+        self.container.setStyleSheet("background-color: #0f0f0f;")
         self.grid = QGridLayout(self.container)
         self.grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.grid.setSpacing(20)

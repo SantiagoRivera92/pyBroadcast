@@ -5,6 +5,7 @@ from ui.album_track_list import AlbumTrackList
 
 class AlbumDetailView(QWidget):
     playTrackRequested = pyqtSignal(object)
+    upButtonClicked = pyqtSignal(object)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -14,6 +15,7 @@ class AlbumDetailView(QWidget):
         layout.setSpacing(0)
         
         self.album_header = AlbumHeader()
+        self.album_header.upButtonClicked.connect(self.upButtonClicked.emit)
         self.album_track_list = AlbumTrackList()
         self.album_track_list.playTrackRequested.connect(self.playTrackRequested.emit)
         
@@ -25,3 +27,6 @@ class AlbumDetailView(QWidget):
     
     def set_tracks(self, tracks):
         self.album_track_list.set_tracks(tracks)
+        
+    def set_artist_id(self, artist_id):
+        self.album_header.set_artist_id(artist_id)

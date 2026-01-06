@@ -7,11 +7,11 @@ class SidebarNavigation(QListWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedWidth(250)
-        self.addItems(["Home", "Artists", "Albums", "Playlists"])
+        self.addItems(["Artists", "Albums", "Playlists"])
         
         self.setStyleSheet("""
             QListWidget {
-                background-color: #000000; 
+                background-color: #0f0f0f; 
                 color: #b3b3b3; 
                 border: none; 
                 outline: none;
@@ -21,7 +21,7 @@ class SidebarNavigation(QListWidget):
             }
             QListWidget::item {
                 padding: 15px 20px;
-                border-radius: 6px;
+                border-radius: 8px;
                 margin: 2px 0px;
             }
             QListWidget::item:hover {
@@ -29,8 +29,8 @@ class SidebarNavigation(QListWidget):
                 color: #ffffff;
             }
             QListWidget::item:selected {
-                background-color: #282828;
-                color: #5DADE2;
+                background-color: #1a1a1a;
+                color: #4DA6FF;
             }
         """)
         

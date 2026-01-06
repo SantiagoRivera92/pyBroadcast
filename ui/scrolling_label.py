@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import QLabel
-from PyQt6.QtCore import QTimer, Qt, QPropertyAnimation, QRect
+from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QPainter, QFontMetrics
 
 class ScrollingLabel(QLabel):
