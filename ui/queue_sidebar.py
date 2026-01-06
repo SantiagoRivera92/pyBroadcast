@@ -80,28 +80,29 @@ class QueueItem(QWidget):
         layout.addWidget(text_container, alignment=Qt.AlignmentFlag.AlignVCenter)
         
         # Remove button
-        remove_btn = QPushButton("×")
-        remove_btn.setFixedSize(32, 32)
-        remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        remove_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                border: none;
-                border-radius: 16px;
-                color: #666666;
-                font-size: 24px;
-                font-weight: 300;
-            }
-            QPushButton:hover {
-                background: rgba(255, 255, 255, 0.08);
-                color: #FFFFFF;
-            }
-            QPushButton:pressed {
-                background: rgba(255, 255, 255, 0.12);
-            }
-        """)
-        remove_btn.clicked.connect(lambda: self.removeRequested.emit(self.index))
-        layout.addWidget(remove_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
+        if not is_current:
+            remove_btn = QPushButton("×")
+            remove_btn.setFixedSize(32, 32)
+            remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            remove_btn.setStyleSheet("""
+                QPushButton {
+                    background: transparent;
+                    border: none;
+                    border-radius: 16px;
+                    color: #666666;
+                    font-size: 24px;
+                    font-weight: 300;
+                }
+                QPushButton:hover {
+                    background: rgba(255, 255, 255, 0.08);
+                    color: #FFFFFF;
+                }
+                QPushButton:pressed {
+                    background: rgba(255, 255, 255, 0.12);
+                }
+            """)
+            remove_btn.clicked.connect(lambda: self.removeRequested.emit(self.index - 1))
+            layout.addWidget(remove_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
         
         # Widget background styling
         self.setStyleSheet(f"""
@@ -135,10 +136,10 @@ class QueueSidebar(QFrame):
         layout.setSpacing(0)
         
         header = QFrame()
-        header.setFixedHeight(60)
+        header.setFixedHeight(64)
         header.setStyleSheet("background-color: #000000; border-bottom: 1px solid #282828;")
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(20, 0, 20, 0)
+        header_layout.setContentsMargins(20, 0, 0, 0)
         
         title = QLabel("Play Queue")
         title.setStyleSheet("color: white; font-size: 18px; font-weight: bold; margin-left: 4px;")
@@ -175,12 +176,13 @@ class QueueSidebar(QFrame):
                 background-color: #000000;
                 border: none;
                 outline: none;
-                padding-bottom: 48px;
+                padding: 0px;
+                margin: 0px;
             }
             QListWidget::item {
                 border: none;
                 padding: 0px;
-                margin: 5px 10px;
+                margin: 2px 10px;
             }
             QListWidget::item:selected {
                 background: transparent;
@@ -192,8 +194,8 @@ class QueueSidebar(QFrame):
         model = self.queue_list.model()
         if model:
             model.rowsMoved.connect(self._on_rows_moved)
-        
-        layout.addWidget(self.queue_list)
+        self.queue_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        layout.addWidget(self.queue_list, stretch=1)
         
         self.tracks_data = []
         self.current_index = 0
@@ -217,14 +219,20 @@ class QueueSidebar(QFrame):
         """
         self.tracks_data = tracks_data
         self.current_index = current_index
-        
         self.queue_list.clear()
         
         # Display all tracks, checking the 'is_current' flag in each track dict
         for i, track in enumerate(tracks_data):
             is_current = track.get('is_current', False)
             self._add_track_item(track, i, is_current)
-            
+        
+        # Add a footer to provide spacing at the bottom
+        footer = QListWidgetItem(self.queue_list)
+        size_hint = QWidget().sizeHint()
+        size_hint.setHeight(64)
+        footer.setSizeHint(size_hint)
+        self.queue_list.addItem(footer)
+    
     def _add_track_item(self, track, index, is_current):
         item = QListWidgetItem(self.queue_list)
         

@@ -3,6 +3,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap, QImage
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PyQt6.QtCore import QUrl
+from ui.scrolling_label import ScrollingLabel
 
 class ArtistHeader(QFrame):
     upButtonClicked = pyqtSignal(object)
@@ -60,7 +61,8 @@ class ArtistHeader(QFrame):
         artist_type_label.setTextFormat(Qt.TextFormat.PlainText)
         
         # Artist name with fixed height
-        self.artist_name = QLabel("Artist Name")
+        self.artist_name = ScrollingLabel(info_container)
+        self.artist_name.setText("Artist Name")
         self.artist_name.setFixedHeight(70)
         self.artist_name.setStyleSheet("""
             QLabel {

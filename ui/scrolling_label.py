@@ -15,6 +15,10 @@ class ScrollingLabel(QLabel):
         self.wait_timer.timeout.connect(self.start_scrolling)
         self.is_scrolling = False
         self.needs_scroll = False
+        self.gap = 50
+        
+    def setGap(self, gap):
+        self.gap = gap
         
     def setText(self, a0):
         self.full_text =a0
@@ -61,10 +65,8 @@ class ScrollingLabel(QLabel):
             return
         fm = QFontMetrics(self.font())
         text_width = fm.horizontalAdvance(self.full_text)
-        gap = 50  # pixels between end and start
         self.scroll_offset += 1
-        # Reset when the entire text and gap have scrolled out of view
-        if self.scroll_offset > text_width + gap:
+        if self.scroll_offset > text_width + self.gap:
             self.scroll_offset = 0
         self.update()
     
@@ -79,10 +81,8 @@ class ScrollingLabel(QLabel):
         x = -self.scroll_offset
         y = self.height() // 2 + painter.fontMetrics().ascent() // 2
         text_width = painter.fontMetrics().horizontalAdvance(self.full_text)
-        gap = 50  # pixels between end and start
-        # Draw the text and a second copy for seamless looping with a gap
         painter.drawText(x, y, self.full_text)
-        painter.drawText(x + text_width + gap, y, self.full_text)
+        painter.drawText(x + text_width + self.gap, y, self.full_text)
         painter.end()
     
     def resizeEvent(self, a0):

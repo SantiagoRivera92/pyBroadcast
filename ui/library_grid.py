@@ -1,29 +1,34 @@
 from PyQt6.QtGui import QImage, QPixmap
-from PyQt6.QtWidgets import QScrollArea, QGridLayout, QWidget, QVBoxLayout, QLabel
+from PyQt6.QtWidgets import QScrollArea, QGridLayout, QWidget, QVBoxLayout, QFrame
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PyQt6.QtCore import QUrl, Qt, QTimer, QRect
 
-from ui.clickable_image import ClickableImage
+from ui.rounded_image import RoundedImage
+from ui.hoverable_widget import HoverableWidget
+from ui.scrolling_label import ScrollingLabel
 
 class LibraryGrid(QScrollArea):
     def __init__(self, item_click_callback):
         super().__init__()
         self.setWidgetResizable(True)
         self.setStyleSheet("QScrollArea { border: none; background-color: #0f0f0f; }")
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.container = QWidget()
         self.container.setStyleSheet("background-color: #0f0f0f;")
         self.grid = QGridLayout(self.container)
         self.grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        self.grid.setSpacing(20)
-        self.grid.setContentsMargins(20, 20, 20, 20)
+        self.grid.setSpacing(10)
+        self.grid.setContentsMargins(10, 10, 10, 10)
+        
+        
         self.setWidget(self.container)
         
         self.callback = item_click_callback
         self.network_manager = QNetworkAccessManager()
         
         # Item dimensions for column calculation
-        self.item_width = 160
-        self.item_spacing = 20
+        self.item_width = 180
+        self.item_spacing = 10
         self.margin = 20
         
         # Priority Loading State
@@ -35,7 +40,7 @@ class LibraryGrid(QScrollArea):
         self.items_queue = []
         self.current_row = 0
         self.current_col = 0
-        self.columns = 5  # Default, will be recalculated
+        self.columns = 5 
         
         # Debounce timer for scroll events
         self.load_timer = QTimer()
@@ -102,30 +107,45 @@ class LibraryGrid(QScrollArea):
 
     def _add_item_to_grid(self, title, subtitle, image_url, item_id):
         """Internal method to add item to grid at current position"""
-        item_widget = QWidget()
+        item_widget = HoverableWidget(self.callback, item_id)
         layout = QVBoxLayout(item_widget)
-        layout.setSpacing(5)
-        layout.setContentsMargins(0, 0, 0, 0)
-        
-        img_label = ClickableImage(self.callback, item_id)
+
+        img_label = RoundedImage()
         img_label.setFixedSize(self.item_width, self.item_width)
-        img_label.setStyleSheet("background-color: #282828; border-radius: 8px;")
         img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
+
         # Add to queue instead of starting immediately
         if image_url:
             self.pending_items.append({'label': img_label, 'url': image_url, 'started': False})
-
-        t_label = QLabel(title)
-        t_label.setStyleSheet("color: white; font-weight: bold; margin-top: 5px;")
+        
+        t_label = ScrollingLabel(item_widget)
+        t_label.setText(title)
+        t_label.setGap(25)
+        t_label.setStyleSheet('''
+            QLabel {
+                color: white;
+                font-weight: bold;
+                margin-top: 5px;
+                font-size: 18px;
+            }
+        ''')
         t_label.setWordWrap(True)
-        t_label.setFixedWidth(self.item_width)
-        
-        s_label = QLabel(subtitle)
-        s_label.setStyleSheet("color: #b3b3b3; font-size: 12px;")
+        t_label.setFixedWidth(self.item_width + 2)
+        t_label.setFixedHeight(28)
+
+        s_label = ScrollingLabel(item_widget)
+        s_label.setText(subtitle)
+        s_label.setGap(25)
+        s_label.setStyleSheet('''
+            QLabel {
+                color: #b3b3b3;
+                font-size: 14px;
+                margin-left: 2px;
+            }
+        ''')
         s_label.setWordWrap(True)
-        s_label.setFixedWidth(self.item_width)
-        
+        s_label.setFixedWidth(self.item_width + 2)
+
         layout.addWidget(img_label)
         layout.addWidget(t_label)
         layout.addWidget(s_label)

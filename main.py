@@ -307,6 +307,7 @@ class iBroadcastNative(QMainWindow):
 
     def load_artists(self):
         self.content_stack.setCurrentWidget(self.artists_view)
+        self._showing_artist_albums=False
         self.artist_header.setVisible(self._showing_artist_albums)
         self.artists_view.clear()
         artists = sorted(self.api.library['albumartists'].values(), key=lambda x: str(x.get('name', '')).lower())
@@ -323,11 +324,16 @@ class iBroadcastNative(QMainWindow):
             albums = [a for a in albums if int(a.get('artist_id')) == int(artist_id)]
         albums_list = list(albums)
         if artist_id:
-            albums_list.sort(key=lambda x: (x.get('year') or '', str(x.get('name', '')).lower()))
-        print(albums_list)
+            albums_list.sort(key=lambda x: (x.get('year') or 0, str(x.get('name', '')).lower()))
         for album in albums_list:
             artwork = self.api.get_artwork_url(album.get('artwork_id'))
-            self.albums_view.add_item(album.get('name'), "Album", artwork, album.get('item_id'))
+            artist = self.api.library['artists'].get(int(album.get('artist_id')))
+            artist_name = artist.get('name', 'Unknown Artist') if artist else 'Unknown Artist'
+            year = album.get('year', 0)
+            subtitle = f"{artist_name}"
+            if year:
+                subtitle += f" • {year}"
+            self.albums_view.add_item(album.get('name'), subtitle, artwork, album.get('item_id'))
 
     def show_album_detail(self, album_id):
         album_id = int(album_id)

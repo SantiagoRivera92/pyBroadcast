@@ -3,6 +3,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap, QImage
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PyQt6.QtCore import QUrl
+from ui.scrolling_label import ScrollingLabel
 
 class PlaylistHeader(QFrame):
     upButtonClicked = pyqtSignal()
@@ -33,7 +34,10 @@ class PlaylistHeader(QFrame):
         layout.addWidget(self.artwork)
 
         # Playlist info
-        info_layout = QVBoxLayout()
+        info_container = QFrame()
+        info_container.setStyleSheet("QFrame { background: transparent; border: none; }")
+        info_layout = QVBoxLayout(info_container)
+        info_layout.setContentsMargins(0, 0, 0, 0)
         info_layout.setSpacing(10)
 
         playlist_type_label = QLabel("PLAYLIST")
@@ -45,7 +49,8 @@ class PlaylistHeader(QFrame):
             background: none;
         """)
 
-        self.playlist_name = QLabel("Playlist Name")
+        self.playlist_name = ScrollingLabel(info_container)
+        self.playlist_name.setText("Playlist Name")
         self.playlist_name.setStyleSheet("""
             color: white; 
             font-size: 48px; 
@@ -62,7 +67,7 @@ class PlaylistHeader(QFrame):
         info_layout.addWidget(self.track_count_label)
         info_layout.addStretch()
 
-        layout.addLayout(info_layout)
+        layout.addWidget(info_container)
         layout.addStretch()
         
         self.up_button = QPushButton("↑ Playlists")

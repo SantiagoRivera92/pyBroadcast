@@ -3,6 +3,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap, QImage
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PyQt6.QtCore import QUrl
+from ui.scrolling_label import ScrollingLabel
 
 class AlbumHeader(QFrame):
     upButtonClicked = pyqtSignal(object)
@@ -60,8 +61,11 @@ class AlbumHeader(QFrame):
         album_type_label.setTextFormat(Qt.TextFormat.PlainText)
 
         # Album name with fixed height
-        self.album_name = QLabel("Album Name")
+        self.album_name = ScrollingLabel(info_container)
+        self.album_name.setText("Album Name")
         self.album_name.setFixedHeight(60)
+        self.album_name.setMaximumWidth(700)
+        self.album_name.setMinimumWidth(200)
         self.album_name.setStyleSheet("""
             QLabel {
                 color: white; 
@@ -74,10 +78,14 @@ class AlbumHeader(QFrame):
         """)
         self.album_name.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.album_name.setTextFormat(Qt.TextFormat.PlainText)
+        self.album_name.setSizePolicy(self.album_name.sizePolicy().horizontalPolicy(), self.album_name.sizePolicy().verticalPolicy())
 
         # Artist name with fixed height
-        self.artist_name = QLabel("Artist Name")
+        self.artist_name = ScrollingLabel(info_container)
+        self.artist_name.setText("Artist Name")
         self.artist_name.setFixedHeight(28)
+        self.artist_name.setMaximumWidth(700)
+        self.artist_name.setMinimumWidth(200)
         self.artist_name.setStyleSheet("""
             QLabel {
                 color: #b3b3b3; 
@@ -89,6 +97,7 @@ class AlbumHeader(QFrame):
         """)
         self.artist_name.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.artist_name.setTextFormat(Qt.TextFormat.PlainText)
+        self.artist_name.setSizePolicy(self.artist_name.sizePolicy().horizontalPolicy(), self.artist_name.sizePolicy().verticalPolicy())
 
         # Year label with fixed height
         self.year_label = QLabel("")
