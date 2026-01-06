@@ -2,11 +2,9 @@ import flet as ft
 
 class ArtistHeader(ft.Container):
     def __init__(self, visible=False):
-        # Create controls first
         self.artwork = ft.Image(
-            fit="cover",
             border_radius=90,
-            src=None
+            src=""
         )
         
         self.artist_name = ft.Text(
@@ -19,11 +17,7 @@ class ArtistHeader(ft.Container):
         super().__init__(
             height=280,
             visible=visible,
-            bgcolor=ft.LinearGradient(
-                begin=ft.alignment.Alignment.TOP_CENTER,
-                end=ft.alignment.Alignment.BOTTOM_CENTER,
-                colors=["#1a1a1a", "#121212"],
-            ),
+            bgcolor="#1a1a1a",
             padding=40,
             content=ft.Row(
                 controls=[
@@ -62,8 +56,6 @@ class ArtistHeader(ft.Container):
         if artwork_url:
             self.artwork.src = artwork_url
             self.artwork.visible = True
-            # Remove background color when image is loaded
-            self.content.content.controls[0].bgcolor = None
         else:
             self.artwork.visible = False
             # Show first letter as placeholder

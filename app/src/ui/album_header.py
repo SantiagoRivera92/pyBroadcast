@@ -3,9 +3,8 @@ import flet as ft
 class AlbumHeader(ft.Container):
     def __init__(self):
         self.artwork = ft.Image(
-            fit="cover",
             border_radius=16,
-            src=None
+            src=""
         )
         
         self.album_name = ft.Text(
@@ -29,7 +28,8 @@ class AlbumHeader(ft.Container):
         
         super().__init__(
             height=280,
-            bgcolor=ft.LinearGradient(
+            bgcolor="#1a1a1a",
+            gradient=ft.LinearGradient(
                 begin=ft.alignment.Alignment.TOP_CENTER,
                 end=ft.alignment.Alignment.BOTTOM_CENTER,
                 colors=["#1a1a1a", "#121212"],

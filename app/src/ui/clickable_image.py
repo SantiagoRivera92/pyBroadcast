@@ -1,4 +1,3 @@
-# ui/clickable_image_flet.py
 import flet as ft
 
 class ClickableImage(ft.Container):
@@ -10,7 +9,7 @@ class ClickableImage(ft.Container):
             border_radius=8,
             on_click=lambda e: callback(item_id),
             content=ft.Image(
-                fit="cover",
                 border_radius=8,
+                src=""
             ),
         )

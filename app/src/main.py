@@ -1,6 +1,5 @@
-# main.py - WITH Flet-Audio (FIXED for Flet 0.80.1)
 import flet as ft
-import flet_audio as fa
+from audio.MyBroadcastAudio import MyBroadcastAudio
 
 import webbrowser
 import asyncio
@@ -24,14 +23,14 @@ class iBroadcastFlet:
         self.current_track_id = None
         self._showing_artist_albums = False
         
-        self.audio = fa.Audio(src="", autoplay=False, volume=1)
-        self.page.overlay.append(self.audio)
+        self.audio = MyBroadcastAudio(src="")
+        self.page.overlay.append(self.audio.audio)
         
         self.init_ui()
         asyncio.create_task(self.check_auth())
 
     def init_ui(self):
-        self.page.title = "iBroadcast Native"
+        self.page.title = "pyBroadcast"
         self.page.theme_mode = ft.ThemeMode.DARK
         self.page.bgcolor = "#121212"
         
@@ -236,11 +235,14 @@ class iBroadcastFlet:
             await self.load_playlists()
         
         # Update content container
-        self.content_container.content.controls[1] = self.current_view
-        
+        self.content_container.content = ft.Column(
+            controls=[self.artist_header, self.current_view],
+            expand=True,
+        )
+
         if index != 2 or not self._showing_artist_albums:
             self.artist_header.visible = False
-        
+
         self._showing_artist_albums = False
         self.page.update()
     
@@ -319,7 +321,10 @@ class iBroadcastFlet:
         
         # Replace current view with album detail
         self.current_view = album_detail
-        self.content_container.content.controls[1] = album_detail
+        self.content_container.content = ft.Column(
+            controls=[self.artist_header, album_detail],
+            expand=True,
+        )
         self.artist_header.visible = False
         self.page.update()
     
@@ -346,7 +351,10 @@ class iBroadcastFlet:
         self.sidebar_buttons[3].style.color = "#b3b3b3"
         
         self.current_view = self.albums_view
-        self.content_container.content.controls[1] = self.albums_view
+        self.content_container.content = ft.Column(
+            controls=[self.artist_header, self.albums_view],
+            expand=True,
+        )
         await self.load_albums(artist_id)
         self.page.update()
     
@@ -376,14 +384,13 @@ class iBroadcastFlet:
 
         if track:
             url = self.api.get_stream_url(track_id)
-            self.audio.src = url
-            self.audio.autoplay = True
-            self.audio.update()
-            
+            self.audio.set_audio_source(url)
+            await self.audio.play()
+
             track_name = track.get('title', 'Unknown Track')
             artist_name = artist.get('name', 'Unknown Artist') if artist else 'Unknown Artist'
             artwork_url = self.api.get_artwork_url(track.get('artwork_id'))
-            
+
             self.controls.set_track_info(track_name, artist_name, artwork_url)
             self.controls.set_playing(True)
             self.is_playing = True
@@ -391,23 +398,16 @@ class iBroadcastFlet:
     
     async def toggle_play(self, e):
         if self.is_playing:
-            # Pause audio
-            self.audio.autoplay = False
-            # Check if the Audio control has a pause method
-            if hasattr(self.audio, 'pause'):
-                self.audio.pause()
+            await self.audio.pause()
             self.is_playing = False
             self.controls.set_playing(False)
         else:
-            # Resume playing
-            self.audio.autoplay = True
-            if hasattr(self.audio, 'resume'):
-                self.audio.resume()
+            await self.audio.play()
             if self.current_track_id:
                 await self.play_track_by_id(self.current_track_id)
             self.is_playing = True
             self.controls.set_playing(True)
-        await self.audio.update_async()
+        self.audio.update()
         self.page.update()
     
     async def play_next(self, e):
@@ -458,8 +458,8 @@ class iBroadcastFlet:
     
     async def set_volume(self, e):
         volume = e.control.value / 100
-        self.audio.volume = volume
-        await self.audio.update_async()
+        self.audio.set_volume(volume)
+        self.audio.update()
 
 def main(page: ft.Page):
     app = iBroadcastFlet(page)

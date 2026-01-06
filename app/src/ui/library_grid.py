@@ -1,6 +1,4 @@
-# ui/library_grid_flet.py
 import flet as ft
-import asyncio
 
 class LibraryGrid(ft.GridView):
     def __init__(self, item_click_callback):
@@ -39,9 +37,8 @@ class LibraryGrid(ft.GridView):
         if image_url:
             img = ft.Image(
                 src=image_url,
-                fit="cover",
                 border_radius=8,
-                visible=True,  # Flet loads images automatically
+                visible=True,
             )
             img_container.content = img
             # Store reference for potential future use
@@ -88,5 +85,4 @@ class LibraryGrid(ft.GridView):
         self.controls.append(card)
     
     def scroll_to_index(self, index):
-        # Flet GridView handles scrolling internally
         pass

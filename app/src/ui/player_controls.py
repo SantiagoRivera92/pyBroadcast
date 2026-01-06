@@ -1,13 +1,10 @@
-# ui/player_controls_flet.py
 import flet as ft
 
 class PlayerControls(ft.Container):
     def __init__(self):
-        # Create controls first
         self.artwork = ft.Image(
-            fit="cover",
             border_radius=4,
-            src=None
+            src=""
         )
         
         self.track_name = ft.Text(

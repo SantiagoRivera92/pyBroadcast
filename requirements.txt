@@ -1,4 +1,4 @@
-PyQt6==6.10.1
-pyqt6_sip==13.10.3
+flet==0.80.1
+flet_audio==0.80.1
 python-dotenv==1.2.1
 Requests==2.32.5
