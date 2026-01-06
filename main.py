@@ -1,12 +1,14 @@
 import sys
 import webbrowser
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QStackedWidget, QMessageBox)
+                             QHBoxLayout, QStackedWidget, QMessageBox, QMenuBar)
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtCore import QUrl, QTimer, Qt
+from PyQt6.QtGui import QAction
 
 from api.ibroadcast_api import iBroadcastAPI
 from api.queue_cache import QueueCache
+from api.lastfm_api import LastFMAPI  # NEW
 
 from ui.search_header import SearchHeader
 from ui.sidebar_navigation import SidebarNavigation
@@ -17,12 +19,14 @@ from ui.album_detail_view import AlbumDetailView
 from ui.playlist_detail_view import PlaylistDetailView
 from ui.queue_sidebar import QueueSidebar
 from ui.context_menus import TrackContextMenu
+from ui.options_dialog import OptionsDialog  # NEW
 
 class iBroadcastNative(QMainWindow):
     def __init__(self):
         super().__init__()
         self.api = iBroadcastAPI()
         self.queue_cache = QueueCache()
+        self.lastfm = LastFMAPI()  # NEW
         self.media_player = QMediaPlayer()
         self.audio_output = QAudioOutput()
         self.media_player.setAudioOutput(self.audio_output)
@@ -34,6 +38,12 @@ class iBroadcastNative(QMainWindow):
         
         self.current_album_id = None
         self.current_playlist_id = None
+        
+        # Last.fm scrobbling tracking - NEW
+        self.track_start_time = None
+        self.track_duration = 0
+        self.scrobbled = False
+        self.current_track_info = {}
         
         # Timer for updating queue cache position
         self.cache_update_timer = QTimer()
@@ -47,12 +57,16 @@ class iBroadcastNative(QMainWindow):
         self.timer.start(1000)
         
         self.media_player.mediaStatusChanged.connect(self.on_media_status_changed)
+        self.media_player.playbackStateChanged.connect(self.on_playback_state_changed)  # NEW
         
         self.check_auth()
 
     def init_ui(self):
         self.setWindowTitle("iBroadcast Native")
         self.resize(1400, 900)
+        
+        # Add menu bar - NEW
+        self.create_menu_bar()
         
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -132,6 +146,30 @@ class iBroadcastNative(QMainWindow):
         self.controls.repeat_btn.clicked.connect(self.toggle_repeat)
         self.controls.progress.sliderPressed.connect(self.on_seek_start)
         self.controls.progress.sliderReleased.connect(self.on_seek_end)
+
+    def create_menu_bar(self):
+        """Create the menu bar - NEW"""
+        menubar = self.menuBar()
+        
+        # File menu
+        file_menu = menubar.addMenu("&File")
+        
+        options_action = QAction("&Options", self)
+        options_action.setShortcut("Ctrl+,")
+        options_action.triggered.connect(self.show_options)
+        file_menu.addAction(options_action)
+        
+        file_menu.addSeparator()
+        
+        exit_action = QAction("E&xit", self)
+        exit_action.setShortcut("Ctrl+Q")
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+    
+    def show_options(self):
+        """Show the options dialog - NEW"""
+        dialog = OptionsDialog(self.lastfm, self)
+        dialog.exec()
 
     def show_track_context_menu_album(self, pos):
         table = self.album_detail_view.album_track_list.table
@@ -454,6 +492,7 @@ class iBroadcastNative(QMainWindow):
     def play_track_by_id(self, track_id):
         track = None
         artist = None
+        album = None
         for tr in self.api.library['tracks'].values():
             if str(tr.get('item_id')) == str(track_id):
                 track = tr
@@ -463,6 +502,10 @@ class iBroadcastNative(QMainWindow):
                 if str(ar.get('item_id')) == str(track.get('artist_id')):
                     artist = ar
                     break
+            for al in self.api.library['albums'].values():
+                if str(al.get('item_id')) == str(track.get('album_id')):
+                    album = al
+                    break
 
         if track:
             url = self.api.get_stream_url(track_id)
@@ -470,6 +513,18 @@ class iBroadcastNative(QMainWindow):
             self.media_player.play()
             
             self.current_track_id = track_id
+            
+            # Reset scrobbling state for new/repeated track - IMPORTANT!
+            self.scrobbled = False
+            self.track_start_time = None  # Will be set when playback actually starts
+            
+            # Store track info for Last.fm scrobbling
+            self.current_track_info = {
+                'artist': artist.get('name', 'Unknown Artist') if artist else 'Unknown Artist',
+                'track': track.get('title', 'Unknown Track'),
+                'album': album.get('name') if album else None
+            }
+            self.track_duration = track.get('length', 0)  # Duration in seconds
             
             track_name = track.get('title', 'Unknown Track')
             artist_name = artist.get('name', 'Unknown Artist') if artist else 'Unknown Artist'
@@ -482,6 +537,64 @@ class iBroadcastNative(QMainWindow):
             self.queue_cache.set_current_track(track_id, 0.0)
             self.update_queue_display()
 
+    def on_playback_state_changed(self, state):
+        """Handle playback state changes for Last.fm"""
+        import time
+        if state == QMediaPlayer.PlaybackState.PlayingState:
+            if self.track_start_time is None:
+                self.track_start_time = time.time()
+                # Update Now Playing on Last.fm
+                if self.lastfm.is_authenticated() and self.current_track_info:
+                    result = self.lastfm.update_now_playing(
+                        self.current_track_info['artist'],
+                        self.current_track_info['track'],
+                        self.current_track_info.get('album')
+                    )
+                    if result['success']:
+                        print(f"Now Playing updated: {self.current_track_info['track']} by {self.current_track_info['artist']}")
+                    else:
+                        print(f"Failed to update Now Playing: {result.get('message', 'Unknown error')}")
+
+    def check_scrobble_conditions(self):
+        """Check if we should scrobble the current track"""
+        import time
+        if self.scrobbled or not self.lastfm.is_authenticated():
+            return
+        
+        if not self.current_track_info or not self.track_start_time:
+            return
+        
+        # Calculate how long the track has been playing
+        elapsed = time.time() - self.track_start_time
+        
+        # Scrobble if:
+        # 1. Track has been playing for at least 30% of its duration, OR
+        # 2. Track has been playing for at least 4 minutes (240 seconds)
+        threshold = max(self.track_duration * 0.3, 240) if self.track_duration > 0 else 240
+        
+        if elapsed >= threshold:
+            self.scrobble_track()
+
+    def scrobble_track(self):
+        """Scrobble the current track to Last.fm"""
+        if self.scrobbled or not self.lastfm.is_authenticated():
+            return
+        
+        if not self.current_track_info:
+            return
+        
+        result = self.lastfm.scrobble(
+            self.current_track_info['artist'],
+            self.current_track_info['track'],
+            self.current_track_info.get('album')
+        )
+        
+        if result['success']:
+            self.scrobbled = True
+            print(f"Scrobbled: {self.current_track_info['track']} by {self.current_track_info['artist']}")
+        else:
+            print(f"Failed to scrobble: {result.get('message', 'Unknown error')}")
+
     def toggle_play(self):
         if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.media_player.pause()
@@ -491,6 +604,9 @@ class iBroadcastNative(QMainWindow):
             self.controls.set_playing(True)
 
     def play_next(self):
+        # Check if we should scrobble before moving to next track
+        self.check_scrobble_conditions()
+        
         if self.repeat_mode == "one":
             self.media_player.setPosition(0)
             self.media_player.play()
@@ -502,8 +618,6 @@ class iBroadcastNative(QMainWindow):
             self.current_queue = self.queue_cache.tracks.copy()
             self.play_track_by_id(next_track)
         elif self.repeat_mode == "all" and self.current_track_id:
-            # If repeat all is on and we reach the end, we could restart from the beginning
-            # For now, just stop
             self.media_player.stop()
             self.controls.set_playing(False)
         else:
@@ -516,7 +630,6 @@ class iBroadcastNative(QMainWindow):
             self.media_player.setPosition(0)
             return
         
-        # Could implement previous track logic here if needed
         self.media_player.setPosition(0)
 
     def toggle_shuffle(self):
@@ -551,10 +664,16 @@ class iBroadcastNative(QMainWindow):
             current = self.media_player.position() // 1000
             total = self.media_player.duration() // 1000
             self.controls.update_time_labels(current, total)
+            
+            # Check if we should scrobble
+            self.check_scrobble_conditions()
 
     def on_media_status_changed(self, status):
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
+            # Track finished, check if we should scrobble
+            self.check_scrobble_conditions()
             self.play_next()
+    
     
     def restore_queue_from_cache(self):
         """Restore queue from cache when app starts"""
