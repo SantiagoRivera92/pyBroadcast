@@ -1,9 +1,9 @@
 import sys
 import webbrowser
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QStackedWidget)
+                             QHBoxLayout, QStackedWidget, QMessageBox)
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
-from PyQt6.QtCore import QUrl, QTimer
+from PyQt6.QtCore import QUrl, QTimer, Qt
 
 from api.ibroadcast_api import iBroadcastAPI
 
@@ -13,7 +13,9 @@ from ui.library_grid import LibraryGrid
 from ui.player_controls import PlayerControls
 from ui.artist_header import ArtistHeader
 from ui.album_detail_view import AlbumDetailView
+from ui.playlist_detail_view import PlaylistDetailView
 from ui.queue_sidebar import QueueSidebar
+from ui.context_menus import TrackContextMenu
 from api.play_queue_websocket import PlayQueueWebSocket
 
 class iBroadcastNative(QMainWindow):
@@ -27,9 +29,11 @@ class iBroadcastNative(QMainWindow):
         self.current_queue = []
         self.current_index = 0
         self.shuffle_enabled = False
-        self.repeat_mode = "off"  # "off", "all", "one"
+        self.repeat_mode = "off"
         
-        # Play Queue WebSocket
+        self.current_album_id = None
+        self.current_playlist_id = None
+        
         self.play_queue_ws = None
         
         self.init_ui()
@@ -38,7 +42,6 @@ class iBroadcastNative(QMainWindow):
         self.timer.timeout.connect(self.update_position)
         self.timer.start(1000)
         
-        # Connect media player signals
         self.media_player.mediaStatusChanged.connect(self.on_media_status_changed)
         
         self.check_auth()
@@ -53,64 +56,70 @@ class iBroadcastNative(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # Search Header
         self.search_header = SearchHeader()
         self.search_header.searchTextChanged.connect(self.handle_search)
         main_layout.addWidget(self.search_header)
 
-        # Body Layout
         body_layout = QHBoxLayout()
         body_layout.setSpacing(0)
         body_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Sidebar Navigation
         self.sidebar = SidebarNavigation()
         self.sidebar.viewChanged.connect(self.switch_view)
         body_layout.addWidget(self.sidebar)
         
-        # Content area with artist header
         self.content_container = QWidget()
         content_layout = QVBoxLayout(self.content_container)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
         
-        # Artist header (hidden by default)
         self.artist_header = ArtistHeader()
         self.artist_header.setVisible(False)
         content_layout.addWidget(self.artist_header)
         
-        # Stacked widget for different views
         self.content_stack = QStackedWidget()
         self.home_view = LibraryGrid(self.show_album_detail)
         self.artists_view = LibraryGrid(self.show_artist_albums)
         self.albums_view = LibraryGrid(self.show_album_detail)
-        self.playlists_view = LibraryGrid(self.play_playlist)
+        self.playlists_view = LibraryGrid(self.show_playlist_detail)
         self.album_detail_view = AlbumDetailView()
-        self.album_detail_view.playTrackRequested.connect(self.play_track_by_id)
+        self.album_detail_view.playTrackRequested.connect(self.play_track_from_album)
+        self.playlist_detail_view = PlaylistDetailView()
+        self.playlist_detail_view.playTrackRequested.connect(self.play_track_from_playlist)
 
-        self.content_stack.addWidget(self.home_view)           # 0
-        self.content_stack.addWidget(self.artists_view)        # 1
-        self.content_stack.addWidget(self.albums_view)         # 2
-        self.content_stack.addWidget(self.playlists_view)      # 3
-        self.content_stack.addWidget(self.album_detail_view)   # 4
+        self.content_stack.addWidget(self.home_view)
+        self.content_stack.addWidget(self.artists_view)
+        self.content_stack.addWidget(self.albums_view)
+        self.content_stack.addWidget(self.playlists_view)
+        self.content_stack.addWidget(self.album_detail_view)
+        self.content_stack.addWidget(self.playlist_detail_view)
 
         content_layout.addWidget(self.content_stack)
+        
+        self.album_detail_view.album_track_list.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.album_detail_view.album_track_list.table.customContextMenuRequested.connect(
+            self.show_track_context_menu_album
+        )
+        
+        self.playlist_detail_view.track_list.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.playlist_detail_view.track_list.table.customContextMenuRequested.connect(
+            self.show_track_context_menu_playlist
+        )
+        
         body_layout.addWidget(self.content_container)
         
-        # Queue Sidebar
         self.queue_sidebar = QueueSidebar()
         self.queue_sidebar.playTrackRequested.connect(self.play_track_from_queue)
         self.queue_sidebar.removeTrackRequested.connect(self.remove_from_queue)
         self.queue_sidebar.clearQueueRequested.connect(self.clear_queue)
+        self.queue_sidebar.reorderRequested.connect(self.reorder_queue)
         body_layout.addWidget(self.queue_sidebar)
         
         main_layout.addLayout(body_layout)
 
-        # Player Controls
         self.controls = PlayerControls()
         main_layout.addWidget(self.controls)
         
-        # Connect player control signals
         self.controls.play_btn.clicked.connect(self.toggle_play)
         self.controls.next_btn.clicked.connect(self.play_next)
         self.controls.prev_btn.clicked.connect(self.play_previous)
@@ -120,6 +129,36 @@ class iBroadcastNative(QMainWindow):
         self.controls.progress.sliderPressed.connect(self.on_seek_start)
         self.controls.progress.sliderReleased.connect(self.on_seek_end)
 
+    def show_track_context_menu_album(self, pos):
+        table = self.album_detail_view.album_track_list.table
+        row = table.rowAt(pos.y())
+        if row < 0:
+            return
+        
+        menu = TrackContextMenu(self)
+        menu.play_action.triggered.connect(lambda: self.play_track_from_album_at_row(row))
+        menu.add_next_action.triggered.connect(lambda: self.add_track_to_queue_from_album(row, after_current=True))
+        menu.add_end_action.triggered.connect(lambda: self.add_track_to_queue_from_album(row, after_current=False))
+        
+        viewport = table.viewport()
+        if viewport:
+            menu.exec(viewport.mapToGlobal(pos))
+    
+    def show_track_context_menu_playlist(self, pos):
+        table = self.playlist_detail_view.track_list.table
+        row = table.rowAt(pos.y())
+        if row < 0:
+            return
+        
+        menu = TrackContextMenu(self)
+        menu.play_action.triggered.connect(lambda: self.play_track_from_playlist_at_row(row))
+        menu.add_next_action.triggered.connect(lambda: self.add_track_to_queue_from_playlist(row, after_current=True))
+        menu.add_end_action.triggered.connect(lambda: self.add_track_to_queue_from_playlist(row, after_current=False))
+        
+        viewport = table.viewport()
+        if viewport:
+            menu.exec(viewport.mapToGlobal(pos))
+    
     def handle_search(self, text):
         if len(text) < 2: 
             if self.sidebar.currentRow() == 0:
@@ -133,17 +172,14 @@ class iBroadcastNative(QMainWindow):
         results = []
         query = text.lower()
 
-        # Search artists
         for aid, artist in self.api.library['artists'].items():
             if query in str(artist.get('name', '')).lower():
                 results.append((artist.get('name'), "Artist", artist.get('artwork_id'), aid))
 
-        # Search albums
         for aid, album in self.api.library['albums'].items():
             if query in str(album.get('name', '')).lower():
                 results.append((album.get('name'), "Album", album.get('artwork_id'), aid))
 
-        # Search tracks (songs)
         for tid, track in self.api.library['tracks'].items():
             if query in str(track.get('title', '')).lower():
                 results.append((track.get('title'), "Song", track.get('artwork_id') or '', tid))
@@ -157,14 +193,12 @@ class iBroadcastNative(QMainWindow):
             res = self.api.load_library()
             if res.get('success'):
                 self.load_home()
-                # Connect to play queue WebSocket
                 self.connect_play_queue()
         else:
             self.controls.track_info.setText("Login Required...")
             auth_res = self.api.start_oauth_flow()
             if 'auth_url' in auth_res:
                 webbrowser.open(auth_res['auth_url'])
-                # Start polling for OAuth callback
                 self.oauth_poll_timer = QTimer()
                 self.oauth_poll_timer.setInterval(1000)
                 self.oauth_poll_timer.timeout.connect(self.poll_oauth_callback)
@@ -180,7 +214,6 @@ class iBroadcastNative(QMainWindow):
                 if lib_res.get('success'):
                     self.load_home()
                     self.controls.track_info.setText("")
-                    # Connect to play queue WebSocket
                     self.connect_play_queue()
                 else:
                     self.controls.track_info.setText("Failed to load library after login.")
@@ -192,7 +225,6 @@ class iBroadcastNative(QMainWindow):
 
     def switch_view(self, index):
         self.content_stack.setCurrentIndex(index)
-        # Only hide artist header if not switching to albums for a specific artist
         if not (index == 2 and hasattr(self, '_showing_artist_albums') and self._showing_artist_albums):
             self.artist_header.setVisible(False)
         self._showing_artist_albums = False
@@ -231,8 +263,13 @@ class iBroadcastNative(QMainWindow):
             self.albums_view.add_item(album.get('name'), "Album", artwork, album.get('item_id'))
 
     def show_album_detail(self, album_id):
+        album_id = int(album_id)
+        self.current_album_id = album_id
+        self.current_playlist_id = None
+        
         album = self.api.library['albums'].get(str(album_id)) or self.api.library['albums'].get(album_id)
         if not album:
+            print("Album not found:", album_id, type(album_id))
             return
         
         artist = self.api.library['artists'].get(album.get('artist_id'))
@@ -242,22 +279,52 @@ class iBroadcastNative(QMainWindow):
         
         self.album_detail_view.set_album(album.get('name', 'Unknown Album'), artist_name, year, artwork_url)
 
-        # Get tracks for this album
         tracks = [t for t in self.api.library['tracks'].values() if str(t.get('album_id')) == str(album.get('item_id'))]
         tracks.sort(key=lambda x: x.get('track', 0))
         self.album_detail_view.set_tracks(tracks)
         
-        # Store album tracks for queue
         self._current_album_tracks = [t.get('item_id') for t in tracks]
-
         self.content_stack.setCurrentWidget(self.album_detail_view)
+        self.artist_header.setVisible(False)
+    
+    def show_playlist_detail(self, playlist_id):
+        self.current_playlist_id = playlist_id
+        self.current_album_id = None
+        
+        playlist = self.api.library['playlists'].get(str(playlist_id)) or self.api.library['playlists'].get(playlist_id)
+        if not playlist:
+            return
+        
+        track_ids = playlist.get('tracks', [])
+        
+        artwork_url = ""
+        if track_ids:
+            first_track = self.api.library['tracks'].get(str(track_ids[0]))
+            if first_track and first_track.get('artwork_id'):
+                artwork_url = self.api.get_artwork_url(first_track['artwork_id'])
+        
+        self.playlist_detail_view.set_playlist(
+            playlist.get('name', 'Untitled Playlist'),
+            len(track_ids),
+            artwork_url
+        )
+        
+        tracks = []
+        for track_id in track_ids:
+            track = self.api.library['tracks'].get(str(track_id))
+            if track:
+                tracks.append(track)
+        
+        self.playlist_detail_view.set_tracks(tracks)
+        
+        self._current_playlist_tracks = track_ids
+        self.content_stack.setCurrentWidget(self.playlist_detail_view)
 
     def load_playlists(self):
         self.playlists_view.clear()
         playlists = self.api.library.get('playlists', {})
         
         for pid, pl in playlists.items():
-            # Get artwork from first track in playlist
             artwork_url = ""
             tracks = pl.get('tracks', [])
             if tracks:
@@ -293,18 +360,100 @@ class iBroadcastNative(QMainWindow):
         self.sidebar.setCurrentRow(2)
         self.load_albums(artist_id)
 
-    def play_playlist(self, playlist_id):
-        pl = self.api.library['playlists'].get(playlist_id)
-        if pl and pl.get('tracks'):
-            track_ids = pl['tracks']
-            self.current_queue = track_ids
+    def play_track_from_album(self, track_id):
+        if not hasattr(self, '_current_album_tracks'):
+            return
+        
+        try:
+            track_index = self._current_album_tracks.index(track_id)
+            tracks_to_queue = self._current_album_tracks[track_index:]
+            
+            self.current_queue = tracks_to_queue
             self.current_index = 0
             
-            # Update play queue WebSocket
             if self.play_queue_ws:
-                self.play_queue_ws.set_queue(track_ids, play_index=0)
+                self.play_queue_ws.set_queue(tracks_to_queue, play_index=0)
+            else:
+                # If WebSocket not connected, manually update queue display
+                self.update_queue_display()
             
-            self.play_track_by_id(track_ids[0])
+            self.play_track_by_id(track_id)
+        except ValueError:
+            pass
+    
+    def play_track_from_album_at_row(self, row):
+        if not hasattr(self, '_current_album_tracks') or row >= len(self._current_album_tracks):
+            return
+        
+        tracks_to_queue = self._current_album_tracks[row:]
+        self.current_queue = tracks_to_queue
+        self.current_index = 0
+        
+        if self.play_queue_ws:
+            self.play_queue_ws.set_queue(tracks_to_queue, play_index=0)
+        else:
+            self.update_queue_display()
+        
+        self.play_track_by_id(self._current_album_tracks[row])
+    
+    def add_track_to_queue_from_album(self, row, after_current=False):
+        if not hasattr(self, '_current_album_tracks') or row >= len(self._current_album_tracks):
+            return
+        
+        track_id = self._current_album_tracks[row]
+        
+        if after_current and self.play_queue_ws:
+            self.play_queue_ws.add_to_play_next([track_id])
+        elif self.play_queue_ws:
+            new_tracks = self.current_queue + [track_id]
+            self.play_queue_ws.update_state({'tracks': new_tracks})
+    
+    def play_track_from_playlist(self, track_id):
+        if not hasattr(self, '_current_playlist_tracks'):
+            return
+        
+        try:
+            track_index = self._current_playlist_tracks.index(track_id)
+            tracks_to_queue = self._current_playlist_tracks[track_index:]
+            
+            self.current_queue = tracks_to_queue
+            self.current_index = 0
+            
+            if self.play_queue_ws:
+                self.play_queue_ws.set_queue(tracks_to_queue, play_index=0)
+            else:
+                self.update_queue_display()
+            
+            self.play_track_by_id(track_id)
+        except ValueError:
+            pass
+    
+    def play_track_from_playlist_at_row(self, row):
+        if not hasattr(self, '_current_playlist_tracks') or row >= len(self._current_playlist_tracks):
+            return
+        
+        tracks_to_queue = self._current_playlist_tracks[row:]
+        self.current_queue = tracks_to_queue
+        self.current_index = 0
+        
+        if self.play_queue_ws:
+            self.play_queue_ws.set_queue(tracks_to_queue, play_index=0)
+        else:
+            self.update_queue_display()
+        
+        self.play_track_by_id(self._current_playlist_tracks[row])
+    
+    def add_track_to_queue_from_playlist(self, row, after_current=False):
+        if not hasattr(self, '_current_playlist_tracks') or row >= len(self._current_playlist_tracks):
+            return
+        
+        track_id = self._current_playlist_tracks[row]
+        
+        if after_current and self.play_queue_ws:
+            self.play_queue_ws.add_to_play_next([track_id])
+        elif self.play_queue_ws:
+            new_tracks = self.current_queue + [track_id]
+            self.play_queue_ws.update_state({'tracks': new_tracks})
 
     def play_track_by_id(self, track_id):
         track = None
@@ -331,13 +480,6 @@ class iBroadcastNative(QMainWindow):
             self.controls.set_track_info(track_name, artist_name, artwork_url)
             self.controls.set_playing(True)
             
-            # If playing from album detail and queue is not set, set it to album tracks
-            if hasattr(self, '_current_album_tracks') and not self.current_queue:
-                if self.play_queue_ws:
-                    self.play_queue_ws.set_queue(self._current_album_tracks, 
-                                                 play_index=self._current_album_tracks.index(track_id))
-            
-            # Update play queue WebSocket
             if self.play_queue_ws:
                 self.play_queue_ws.set_current_track(track_id, track_name)
 
@@ -372,13 +514,15 @@ class iBroadcastNative(QMainWindow):
                 self.controls.set_playing(False)
                 return
         
+        if not self.play_queue_ws:
+            self.update_queue_display()
+        
         self.play_track_by_id(self.current_queue[self.current_index])
 
     def play_previous(self):
         if not self.current_queue:
             return
         
-        # If more than 3 seconds into track, restart it
         if self.media_player.position() > 3000:
             self.media_player.setPosition(0)
             return
@@ -386,6 +530,9 @@ class iBroadcastNative(QMainWindow):
         self.current_index -= 1
         if self.current_index < 0:
             self.current_index = len(self.current_queue) - 1 if self.repeat_mode == "all" else 0
+        
+        if not self.play_queue_ws:
+            self.update_queue_display()
         
         self.play_track_by_id(self.current_queue[self.current_index])
 
@@ -401,7 +548,6 @@ class iBroadcastNative(QMainWindow):
         self.repeat_mode = modes[(current_idx + 1) % len(modes)]
         self.controls.set_repeat(self.repeat_mode)
         
-        # Map to iBroadcast repeat modes
         if self.play_queue_ws:
             repeat_map = {'off': 'none', 'all': 'queue', 'one': 'track'}
             self.play_queue_ws.set_repeat_mode(repeat_map[self.repeat_mode])
@@ -432,7 +578,6 @@ class iBroadcastNative(QMainWindow):
             self.play_next()
     
     def connect_play_queue(self):
-        """Connect to the play queue WebSocket"""
         token = self.api.access_token
         if token is not None:
             self.play_queue_ws = PlayQueueWebSocket(
@@ -441,11 +586,9 @@ class iBroadcastNative(QMainWindow):
             self.play_queue_ws.connect()
     
     def on_queue_state_update(self, state, role):
-        """Handle play queue state updates from WebSocket"""
-        # Update local state
+        print("Received queue state update:", state)
         self.current_queue = state.get('play_next', []) + state.get('tracks', [])
         
-        # Get track data for queue display
         tracks_data = []
         for track_id in state.get('tracks', []):
             track = self.api.library['tracks'].get(track_id)
@@ -468,12 +611,10 @@ class iBroadcastNative(QMainWindow):
                     'track_id': track_id
                 })
         
-        # Update queue sidebar
         play_index = state.get('data', {}).get('play_index', 0)
         play_from = state.get('data', {}).get('play_from', 'tracks')
         self.queue_sidebar.set_queue(tracks_data, play_next_data, play_index, play_from)
         
-        # Sync repeat and shuffle
         repeat_mode = state.get('data', {}).get('repeat_mode', 'none')
         if repeat_mode == 'none':
             self.repeat_mode = 'off'
@@ -486,23 +627,18 @@ class iBroadcastNative(QMainWindow):
         self.shuffle_enabled = state.get('shuffle', False)
         self.controls.set_shuffle(self.shuffle_enabled)
         
-        # If we're a controller, don't auto-play
         if role == 'controller':
             print("This client is a controller")
     
     def play_track_from_queue(self, index):
-        """Play a track from the queue by clicking on it"""
         play_next_count = len(self.queue_sidebar.play_next_data)
         
         if index < play_next_count:
-            # Playing from play_next
             track_id = self.queue_sidebar.play_next_data[index]['track_id']
-            # Remove all tracks before this one from play_next
             if self.play_queue_ws:
                 new_play_next = self.play_queue_ws.state['play_next'][index:]
                 self.play_queue_ws.update_state({'play_next': new_play_next})
         else:
-            # Playing from tracks
             tracks_index = index - play_next_count
             track_id = self.queue_sidebar.tracks_data[tracks_index]['track_id']
             if self.play_queue_ws:
@@ -517,16 +653,42 @@ class iBroadcastNative(QMainWindow):
         self.play_track_by_id(track_id)
     
     def remove_from_queue(self, index, is_play_next):
-        """Remove a track from the queue"""
         if self.play_queue_ws:
             self.play_queue_ws.remove_from_queue(index, is_play_next)
     
     def clear_queue(self):
-        """Clear the entire queue"""
         if self.play_queue_ws:
             self.play_queue_ws.clear_queue()
         self.media_player.stop()
         self.controls.set_playing(False)
+    
+    def update_queue_display(self):
+        """Manually update queue display when WebSocket is not connected"""
+        print("Updating queue display manually")
+        if not self.current_queue:
+            print("Current queue is empty")
+            self.queue_sidebar.set_queue([], [], 0, 'tracks')
+            return
+        
+        tracks_data = []
+        for track_id in self.current_queue:
+            track = self.api.library['tracks'].get(str(track_id))
+            if track:
+                artist = self.api.library['artists'].get(track.get('artist_id'))
+                tracks_data.append({
+                    'title': track.get('title', 'Unknown'),
+                    'artist': artist.get('name', 'Unknown Artist') if artist else 'Unknown Artist',
+                    'track_id': track_id
+                })
+        print("Prepared", len(tracks_data), "tracks for queue display")
+        self.queue_sidebar.set_queue(tracks_data, [], self.current_index, 'tracks')
+    
+    def reorder_queue(self, old_index, new_index):
+        if self.play_queue_ws:
+            tracks = self.play_queue_ws.state['tracks'].copy()
+            track = tracks.pop(old_index)
+            tracks.insert(new_index, track)
+            self.play_queue_ws.update_state({'tracks': tracks})
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

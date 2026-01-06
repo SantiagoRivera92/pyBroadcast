@@ -361,3 +361,249 @@ class iBroadcastAPI:
     def clear_cache(self):
         """Clear artwork cache"""
         self.artwork_cache.clear_cache()
+
+    def create_playlist(self, name: str, description: str = "", make_public: bool = False, 
+                       tracks: Optional[list] = None, mood: Optional[str] = None, seed: Optional[int] = None) -> Dict:
+        """
+        Create a new playlist
+        
+        Args:
+            name: Display name for the playlist
+            description: Brief description of playlist contents
+            make_public: Whether playlist should be public
+            tracks: List of track IDs to populate playlist (optional)
+            mood: Mood for auto-generation (optional): happy, party, dance, relaxed, workout, chill
+            seed: Track ID to seed similar track generation (optional)
+        
+        Returns:
+            Dict with success status, playlist_id, and public_id
+        """
+        try:
+            url = f"{self.base_url}/s/JSON/playlists"
+            headers = {'Authorization': f'Bearer {self.access_token}', 'Content-Type': 'application/json'}
+            
+            data = {
+                'mode': 'createplaylist',
+                'name': name,
+                'description': description,
+                'make_public': make_public
+            }
+            
+            if mood:
+                data['mood'] = mood
+            elif seed:
+                data['seed'] = seed
+            elif tracks is not None:
+                data['tracks'] = tracks
+            else:
+                data['tracks'] = []
+            
+            response = self.session.post(url, json=data, headers=headers)
+            result = response.json()
+            
+            if response.status_code == 200 and 'playlist_id' in result:
+                # Reload library to get the new playlist
+                self.load_library()
+                return {
+                    'success': True,
+                    'playlist_id': result['playlist_id'],
+                    'public_id': result.get('public_id'),
+                    'tracks': result.get('tracks', [])
+                }
+            else:
+                return {'success': False, 'message': result.get('message', 'Failed to create playlist')}
+        except Exception as e:
+            return {'success': False, 'message': str(e)}
+    
+    def update_playlist(self, playlist_id: int, name: Optional[str] = None, tracks: Optional[list] = None) -> Dict:
+        """
+        Update playlist name and/or track list
+        
+        Args:
+            playlist_id: ID of playlist to update
+            name: New name for playlist (optional)
+            tracks: New track list (optional) - will replace existing tracks
+        
+        Returns:
+            Dict with success status
+        """
+        try:
+            url = f"{self.base_url}/s/JSON/playlists"
+            headers = {'Authorization': f'Bearer {self.access_token}', 'Content-Type': 'application/json'}
+            
+            data = {
+                'mode': 'updateplaylist',
+                'playlist_id': playlist_id
+            }
+            
+            if name is not None:
+                data['name'] = name
+            
+            if tracks is not None:
+                data['tracks'] = tracks
+            
+            response = self.session.post(url, json=data, headers=headers)
+            
+            if response.status_code == 200:
+                # Reload library to reflect changes
+                self.load_library()
+                return {'success': True}
+            else:
+                result = response.json()
+                return {'success': False, 'message': result.get('message', 'Failed to update playlist')}
+        except Exception as e:
+            return {'success': False, 'message': str(e)}
+    
+    def append_to_playlist(self, playlist_id: int, tracks: list) -> Dict:
+        """
+        Add tracks to existing playlist
+        
+        Args:
+            playlist_id: ID of playlist
+            tracks: List of track IDs to add
+        
+        Returns:
+            Dict with success status
+        """
+        try:
+            url = f"{self.base_url}/s/JSON/playlists"
+            headers = {'Authorization': f'Bearer {self.access_token}', 'Content-Type': 'application/json'}
+            
+            data = {
+                'mode': 'appendplaylist',
+                'playlist_id': playlist_id,
+                'tracks': tracks
+            }
+            
+            response = self.session.post(url, json=data, headers=headers)
+            
+            if response.status_code == 200:
+                self.load_library()
+                return {'success': True}
+            else:
+                result = response.json()
+                return {'success': False, 'message': result.get('message', 'Failed to append to playlist')}
+        except Exception as e:
+            return {'success': False, 'message': str(e)}
+    
+    def reorder_playlist(self, playlist_id: int, tracks: list) -> Dict:
+        """
+        Reorder tracks in a playlist
+        
+        Args:
+            playlist_id: ID of playlist
+            tracks: List of track IDs in new order
+        
+        Returns:
+            Dict with success status
+        """
+        try:
+            url = f"{self.base_url}/s/JSON/playlists"
+            headers = {'Authorization': f'Bearer {self.access_token}', 'Content-Type': 'application/json'}
+            
+            data = {
+                'mode': 'playlistorder',
+                'playlist_id': playlist_id,
+                'tracks': tracks
+            }
+            
+            response = self.session.post(url, json=data, headers=headers)
+            
+            if response.status_code == 200:
+                self.load_library()
+                return {'success': True}
+            else:
+                result = response.json()
+                return {'success': False, 'message': result.get('message', 'Failed to reorder playlist')}
+        except Exception as e:
+            return {'success': False, 'message': str(e)}
+    
+    def delete_playlist(self, playlist_id: int) -> Dict:
+        """
+        Delete a playlist
+        
+        Args:
+            playlist_id: ID of playlist to delete
+        
+        Returns:
+            Dict with success status
+        """
+        try:
+            url = f"{self.base_url}/s/JSON/playlists"
+            headers = {'Authorization': f'Bearer {self.access_token}', 'Content-Type': 'application/json'}
+            
+            data = {
+                'mode': 'deleteplaylist',
+                'playlist_id': playlist_id
+            }
+            
+            response = self.session.post(url, json=data, headers=headers)
+            
+            if response.status_code == 200:
+                self.load_library()
+                return {'success': True}
+            else:
+                result = response.json()
+                return {'success': False, 'message': result.get('message', 'Failed to delete playlist')}
+        except Exception as e:
+            return {'success': False, 'message': str(e)}
+    
+    def make_playlist_public(self, playlist_id: int) -> Dict:
+        """
+        Make a playlist public
+        
+        Args:
+            playlist_id: ID of playlist
+        
+        Returns:
+            Dict with success status and public_id
+        """
+        try:
+            url = f"{self.base_url}/s/JSON/playlists"
+            headers = {'Authorization': f'Bearer {self.access_token}', 'Content-Type': 'application/json'}
+            
+            data = {
+                'mode': 'makeplaylistpublic',
+                'playlist_id': playlist_id
+            }
+            
+            response = self.session.post(url, json=data, headers=headers)
+            result = response.json()
+            
+            if response.status_code == 200:
+                self.load_library()
+                return {'success': True, 'public_id': result.get('public_id')}
+            else:
+                return {'success': False, 'message': result.get('message', 'Failed to make playlist public')}
+        except Exception as e:
+            return {'success': False, 'message': str(e)}
+    
+    def revoke_playlist_public(self, playlist_id: int) -> Dict:
+        """
+        Make a public playlist private
+        
+        Args:
+            playlist_id: ID of playlist
+        
+        Returns:
+            Dict with success status
+        """
+        try:
+            url = f"{self.base_url}/s/JSON/playlists"
+            headers = {'Authorization': f'Bearer {self.access_token}', 'Content-Type': 'application/json'}
+            
+            data = {
+                'mode': 'revokeplaylistpublic',
+                'playlist_id': playlist_id
+            }
+            
+            response = self.session.post(url, json=data, headers=headers)
+            
+            if response.status_code == 200:
+                self.load_library()
+                return {'success': True}
+            else:
+                result = response.json()
+                return {'success': False, 'message': result.get('message', 'Failed to revoke playlist public')}
+        except Exception as e:
+            return {'success': False, 'message': str(e)}

@@ -1,13 +1,15 @@
 from PyQt6.QtWidgets import (QFrame, QVBoxLayout, QLabel, QListWidget, 
                              QListWidgetItem, QPushButton, QHBoxLayout, QWidget)
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QDrag
+from PyQt6.QtCore import QMimeData
 
 class QueueItem(QWidget):
     removeRequested = pyqtSignal(int)
     
     def __init__(self, track_info, index, is_current=False, is_play_next=False):
         super().__init__()
+        print("Creating QueueItem for index", index, "is_current:", is_current, "is_play_next:", is_play_next)
         self.index = index
         self.track_info = track_info
         
@@ -15,7 +17,6 @@ class QueueItem(QWidget):
         layout.setContentsMargins(10, 5, 10, 5)
         layout.setSpacing(10)
         
-        # Track info
         info_layout = QVBoxLayout()
         info_layout.setSpacing(2)
         
@@ -34,7 +35,6 @@ class QueueItem(QWidget):
         info_layout.addWidget(title_label)
         info_layout.addWidget(artist_label)
         
-        # Badge for "Up Next" items
         if is_play_next:
             badge = QLabel("UP NEXT")
             badge.setStyleSheet("""
@@ -50,15 +50,14 @@ class QueueItem(QWidget):
         
         layout.addLayout(info_layout, 1)
         
-        # Remove button
-        remove_btn = QPushButton("×")
+        remove_btn = QPushButton("X")
         remove_btn.setFixedSize(24, 24)
         remove_btn.setStyleSheet("""
             QPushButton {
                 background: none;
                 border: none;
                 color: #b3b3b3;
-                font-size: 20px;
+                font-size: 16px;
                 font-weight: bold;
             }
             QPushButton:hover {
@@ -79,9 +78,10 @@ class QueueItem(QWidget):
         """)
 
 class QueueSidebar(QFrame):
-    playTrackRequested = pyqtSignal(int)  # Track index in queue
-    removeTrackRequested = pyqtSignal(int, bool)  # index, is_play_next
+    playTrackRequested = pyqtSignal(int)
+    removeTrackRequested = pyqtSignal(int, bool)
     clearQueueRequested = pyqtSignal()
+    reorderRequested = pyqtSignal(int, int)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -97,7 +97,6 @@ class QueueSidebar(QFrame):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         
-        # Header
         header = QFrame()
         header.setFixedHeight(60)
         header.setStyleSheet("background-color: #000000; border-bottom: 1px solid #282828;")
@@ -110,7 +109,6 @@ class QueueSidebar(QFrame):
         
         header_layout.addStretch()
         
-        # Clear queue button
         clear_btn = QPushButton("Clear")
         clear_btn.setStyleSheet("""
             QPushButton {
@@ -132,8 +130,9 @@ class QueueSidebar(QFrame):
         
         layout.addWidget(header)
         
-        # Queue list
         self.queue_list = QListWidget()
+        self.queue_list.setDragDropMode(QListWidget.DragDropMode.InternalMove)
+        self.queue_list.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.queue_list.setStyleSheet("""
             QListWidget {
                 background-color: #000000;
@@ -151,23 +150,34 @@ class QueueSidebar(QFrame):
         """)
         self.queue_list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
         self.queue_list.itemClicked.connect(self._on_item_clicked)
+        model = self.queue_list.model()
+        if model:
+            model.rowsMoved.connect(self._on_rows_moved)
         
         layout.addWidget(self.queue_list)
         
-        # Store track data
         self.tracks_data = []
         self.play_next_data = []
         self.current_index = 0
         self.play_from = 'tracks'
     
     def _on_item_clicked(self, item):
-        """Handle item click to play track"""
         widget = self.queue_list.itemWidget(item)
         if isinstance(widget, QueueItem):
             self.playTrackRequested.emit(widget.index)
     
+    def _on_rows_moved(self, parent, start, end, destination, row):
+        play_next_count = len(self.play_next_data)
+        
+        if start >= play_next_count and row >= play_next_count:
+            old_index = start - play_next_count
+            new_index = row - play_next_count
+            if new_index > old_index:
+                new_index -= 1
+            self.reorderRequested.emit(old_index, new_index)
+    
     def set_queue(self, tracks_data, play_next_data, current_index, play_from='tracks'):
-        """Update the queue display"""
+        print("Setting queue with", len(tracks_data), "tracks and", len(play_next_data), "play next")
         self.tracks_data = tracks_data
         self.play_next_data = play_next_data
         self.current_index = current_index
@@ -175,18 +185,16 @@ class QueueSidebar(QFrame):
         
         self.queue_list.clear()
         
-        # Add "Up Next" tracks first
         for i, track in enumerate(play_next_data):
             is_current = (play_from == 'play_next' and i == 0)
             self._add_track_item(track, i, is_current, is_play_next=True)
         
-        # Add main queue tracks
         for i, track in enumerate(tracks_data):
             is_current = (play_from == 'tracks' and i == current_index)
             self._add_track_item(track, i, is_current, is_play_next=False)
     
     def _add_track_item(self, track, index, is_current, is_play_next):
-        """Add a track item to the list"""
+        print("Adding track item:", track.get('title', 'Unknown'), "Index:", index, "Is current:", is_current, "Is play next:", is_play_next)
         item = QListWidgetItem(self.queue_list)
         
         widget = QueueItem(track, index, is_current, is_play_next)
@@ -196,17 +204,14 @@ class QueueSidebar(QFrame):
         self.queue_list.addItem(item)
         self.queue_list.setItemWidget(item, widget)
         
-        # Scroll to current item
         if is_current:
             self.queue_list.scrollToItem(item)
     
     def get_track_count(self):
-        """Get total number of tracks in queue"""
         return len(self.tracks_data) + len(self.play_next_data)
     
     def update_current_track(self, index, play_from='tracks'):
-        """Update which track is currently playing"""
+        print("Updating current track to index", index, "from", play_from)
         self.current_index = index
         self.play_from = play_from
-        # Refresh display
         self.set_queue(self.tracks_data, self.play_next_data, self.current_index, self.play_from)

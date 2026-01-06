@@ -45,6 +45,7 @@ class PlayQueueWebSocket:
             )
             if response.status_code == 200:
                 data = response.json()
+                print(data)
                 return data.get('token')
         except Exception as e:
             print(f"Failed to get playqueue token: {e}")
