@@ -6,9 +6,9 @@ from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtCore import QUrl, QTimer, Qt
 from PyQt6.QtGui import QAction
 
-from api.ibroadcast_api import iBroadcastAPI
+from api.ibroadcast.ibroadcast_api import iBroadcastAPI
 from api.queue_cache import QueueCache
-from api.lastfm_api import LastFMAPI
+from api.lastfm.lastfm_api import LastFMAPI
 
 from ui.search.search_header import SearchHeader
 from ui.navigation.sidebar_navigation import SidebarNavigation

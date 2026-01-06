@@ -8,9 +8,9 @@ import threading
 import socket
 import time
 from http.server import HTTPServer
-from urllib.parse import urlencode, quote
+from urllib.parse import urlencode
 from typing import Dict, Optional
-from api.oauth_callback_handler import OAuthCallbackHandler
+from api.ibroadcast.oauth_callback_handler import OAuthCallbackHandler
 from api.artwork_cache import ArtworkCache
 from dotenv import load_dotenv
 
