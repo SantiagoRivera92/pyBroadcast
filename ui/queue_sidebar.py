@@ -1,79 +1,117 @@
 from PyQt6.QtWidgets import (QFrame, QVBoxLayout, QLabel, QListWidget, 
-                             QListWidgetItem, QPushButton, QHBoxLayout, QWidget)
+                             QListWidgetItem, QPushButton, QHBoxLayout, QWidget, QSizePolicy)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QDrag
 from PyQt6.QtCore import QMimeData
+from ui.scrolling_label import ScrollingLabel
 
 class QueueItem(QWidget):
     removeRequested = pyqtSignal(int)
     
-    def __init__(self, track_info, index, is_current=False, is_play_next=False):
+    def __init__(self, track_info, index, is_current=False):
         super().__init__()
-        print("Creating QueueItem for index", index, "is_current:", is_current, "is_play_next:", is_play_next)
         self.index = index
         self.track_info = track_info
+        self.is_current = is_current
+        
+        # Set fixed height for uniformity
+        self.setFixedHeight(64)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setMaximumWidth(350)  # Match QueueSidebar fixed width
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 5, 10, 5)
-        layout.setSpacing(10)
+        layout.setContentsMargins(16, 0, 16, 0)
+        layout.setSpacing(12)
         
-        info_layout = QVBoxLayout()
-        info_layout.setSpacing(2)
+        # Subtle indicator for current track
+        if is_current:
+            indicator = QWidget()
+            indicator.setFixedSize(3, 32)
+            indicator.setStyleSheet("background-color: #5DADE2; border-radius: 1px;")
+            layout.addWidget(indicator, alignment=Qt.AlignmentFlag.AlignVCenter)
         
-        title_label = QLabel(track_info.get('title', 'Unknown'))
+        # Text container
+        text_container = QWidget(self)
+        text_container.setStyleSheet("background: transparent;")
+        text_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        text_layout = QVBoxLayout(text_container)
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(4)
+        
+        # Title label with proper height
+        title_label = ScrollingLabel(text_container)
+        title_label.setText(track_info.get('title', 'Unknown'))
+        title_label.setFixedHeight(20)
+        title_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         title_label.setStyleSheet(f"""
-            color: {'#5DADE2' if is_current else 'white'};
-            font-weight: {'bold' if is_current else 'normal'};
-            font-size: 14px;
+            QLabel {{
+                color: {'#FFFFFF' if is_current else '#E0E0E0'};
+                font-size: 14px;
+                font-weight: {'500' if is_current else 'normal'};
+                background: transparent;
+                padding: 0px;
+                border: none;
+            }}
         """)
-        title_label.setWordWrap(True)
+        title_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        title_label.setTextFormat(Qt.TextFormat.PlainText)
         
-        artist_label = QLabel(track_info.get('artist', 'Unknown Artist'))
-        artist_label.setStyleSheet("color: #b3b3b3; font-size: 12px;")
-        artist_label.setWordWrap(True)
+        # Artist label with proper height
+        artist_label = ScrollingLabel(text_container)
+        artist_label.setText(track_info.get('artist', 'Unknown Artist'))
+        artist_label.setFixedHeight(18)
+        artist_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        artist_label.setStyleSheet(f"""
+            QLabel {{
+                color: {'#B3B3B3' if is_current else '#808080'};
+                font-size: 12px;
+                background: transparent;
+                padding: 0px;
+                border: none;
+            }}
+        """)
+        artist_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        artist_label.setTextFormat(Qt.TextFormat.PlainText)
         
-        info_layout.addWidget(title_label)
-        info_layout.addWidget(artist_label)
+        text_layout.addWidget(title_label)
+        text_layout.addWidget(artist_label)
+        text_layout.addStretch()
         
-        if is_play_next:
-            badge = QLabel("UP NEXT")
-            badge.setStyleSheet("""
-                background-color: #5DADE2;
-                color: black;
-                padding: 2px 6px;
-                border-radius: 3px;
-                font-size: 10px;
-                font-weight: bold;
-            """)
-            badge.setFixedHeight(20)
-            info_layout.addWidget(badge)
+        layout.addWidget(text_container, alignment=Qt.AlignmentFlag.AlignVCenter)
         
-        layout.addLayout(info_layout, 1)
-        
-        remove_btn = QPushButton("X")
-        remove_btn.setFixedSize(24, 24)
+        # Remove button
+        remove_btn = QPushButton("×")
+        remove_btn.setFixedSize(32, 32)
+        remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         remove_btn.setStyleSheet("""
             QPushButton {
-                background: none;
+                background: transparent;
                 border: none;
-                color: #b3b3b3;
-                font-size: 16px;
-                font-weight: bold;
+                border-radius: 16px;
+                color: #666666;
+                font-size: 24px;
+                font-weight: 300;
             }
             QPushButton:hover {
-                color: #ff4444;
+                background: rgba(255, 255, 255, 0.08);
+                color: #FFFFFF;
+            }
+            QPushButton:pressed {
+                background: rgba(255, 255, 255, 0.12);
             }
         """)
         remove_btn.clicked.connect(lambda: self.removeRequested.emit(self.index))
-        layout.addWidget(remove_btn)
+        layout.addWidget(remove_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
         
+        # Widget background styling
         self.setStyleSheet(f"""
-            QWidget {{
-                background-color: {'#282828' if is_current else '#181818'};
+            QueueItem {{
+                background-color: {'rgba(93, 173, 226, 0.08)' if is_current else 'transparent'};
+                border-left: {'3px solid #5DADE2' if is_current else 'none'};
                 border-radius: 4px;
             }}
-            QWidget:hover {{
-                background-color: #202020;
+            QueueItem:hover {{
+                background-color: rgba(255, 255, 255, 0.08);
             }}
         """)
 
@@ -138,6 +176,7 @@ class QueueSidebar(QFrame):
                 background-color: #000000;
                 border: none;
                 outline: none;
+                padding-bottom: 48px;
             }
             QListWidget::item {
                 border: none;
@@ -149,6 +188,7 @@ class QueueSidebar(QFrame):
             }
         """)
         self.queue_list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+        self.queue_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.queue_list.itemClicked.connect(self._on_item_clicked)
         model = self.queue_list.model()
         if model:
@@ -157,48 +197,44 @@ class QueueSidebar(QFrame):
         layout.addWidget(self.queue_list)
         
         self.tracks_data = []
-        self.play_next_data = []
         self.current_index = 0
-        self.play_from = 'tracks'
     
     def _on_item_clicked(self, item):
         widget = self.queue_list.itemWidget(item)
         if isinstance(widget, QueueItem):
-            self.playTrackRequested.emit(widget.index)
+            print(f"Queue sidebar: Play track requested at index {widget.index}")
+            self.playTrackRequested.emit(widget.index - 1)
     
     def _on_rows_moved(self, parent, start, end, destination, row):
-        play_next_count = len(self.play_next_data)
-        
-        if start >= play_next_count and row >= play_next_count:
-            old_index = start - play_next_count
-            new_index = row - play_next_count
-            if new_index > old_index:
-                new_index -= 1
-            self.reorderRequested.emit(old_index, new_index)
+        old_index = start
+        new_index = row
+        if new_index > old_index:
+            new_index -= 1
+        self.reorderRequested.emit(old_index, new_index)
     
-    def set_queue(self, tracks_data, play_next_data, current_index, play_from='tracks'):
-        print("Setting queue with", len(tracks_data), "tracks and", len(play_next_data), "play next")
+    def set_queue(self, tracks_data, play_next_data=None, current_index=0, play_from='tracks'):
+        """
+        Set the queue display. 
+        For the new system, tracks_data includes both current and upcoming tracks.
+        """
+        print(f"Queue sidebar: Setting queue with {len(tracks_data)} tracks")
         self.tracks_data = tracks_data
-        self.play_next_data = play_next_data
         self.current_index = current_index
-        self.play_from = play_from
         
         self.queue_list.clear()
         
-        for i, track in enumerate(play_next_data):
-            is_current = (play_from == 'play_next' and i == 0)
-            self._add_track_item(track, i, is_current, is_play_next=True)
-        
+        # Display all tracks, checking the 'is_current' flag in each track dict
         for i, track in enumerate(tracks_data):
-            is_current = (play_from == 'tracks' and i == current_index)
-            self._add_track_item(track, i, is_current, is_play_next=False)
+            is_current = track.get('is_current', False)
+            self._add_track_item(track, i, is_current)
+        
+        print(f"Queue sidebar: Added {self.queue_list.count()} items to display")
     
-    def _add_track_item(self, track, index, is_current, is_play_next):
-        print("Adding track item:", track.get('title', 'Unknown'), "Index:", index, "Is current:", is_current, "Is play next:", is_play_next)
+    def _add_track_item(self, track, index, is_current):
         item = QListWidgetItem(self.queue_list)
         
-        widget = QueueItem(track, index, is_current, is_play_next)
-        widget.removeRequested.connect(lambda idx: self.removeTrackRequested.emit(idx, is_play_next))
+        widget = QueueItem(track, index, is_current)
+        widget.removeRequested.connect(lambda idx: self.removeTrackRequested.emit(idx, False))
         
         item.setSizeHint(widget.sizeHint())
         self.queue_list.addItem(item)
@@ -208,10 +244,9 @@ class QueueSidebar(QFrame):
             self.queue_list.scrollToItem(item)
     
     def get_track_count(self):
-        return len(self.tracks_data) + len(self.play_next_data)
+        return len(self.tracks_data)
     
-    def update_current_track(self, index, play_from='tracks'):
-        print("Updating current track to index", index, "from", play_from)
+    def update_current_track(self, index):
+        """Update which track is highlighted as current"""
         self.current_index = index
-        self.play_from = play_from
-        self.set_queue(self.tracks_data, self.play_next_data, self.current_index, self.play_from)
+        self.set_queue(self.tracks_data, [], self.current_index, 'tracks')

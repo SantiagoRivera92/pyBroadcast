@@ -1,10 +1,11 @@
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QLabel, QPushButton, QSlider
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QLabel, QPushButton, QSlider, QSizePolicy
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QPixmap, QImage, QIcon
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PyQt6.QtCore import QUrl
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtGui import QPainter
+from ui.scrolling_label import ScrollingLabel
 
 class SvgButton(QPushButton):
     def __init__(self, svg_path, size=24, parent=None):
@@ -85,21 +86,27 @@ class PlayerControls(QFrame):
         
         self.artwork = QLabel()
         self.artwork.setFixedSize(70, 70)
-        self.artwork.setStyleSheet("background-color: #282828; border-radius: 4px;")
+        self.artwork.setStyleSheet("background-color: #181818; background-color: #282828; border-radius: 4px;")
         self.artwork.setScaledContents(True)
         left_layout.addWidget(self.artwork)
         
-        info_layout = QVBoxLayout()
+        info_widget = QFrame(self)
+        info_layout = QVBoxLayout(info_widget)
         info_layout.setSpacing(2)
-        self.track_name = QLabel("No track playing")
+        self.track_name = ScrollingLabel(info_widget)
+        self.track_name.setText("No track playing")
         self.track_name.setStyleSheet("color: white; font-weight: bold; font-size: 15px;")
-        self.artist_name = QLabel("")
+        self.track_name.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        self.artist_name = ScrollingLabel(info_widget)
+        self.artist_name.setText("")
         self.artist_name.setStyleSheet("color: #b3b3b3; font-size: 13px;")
+        self.artist_name.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         info_layout.addWidget(self.track_name)
         info_layout.addWidget(self.artist_name)
         info_layout.addStretch()
-        
-        left_layout.addLayout(info_layout)
+        info_widget.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        self._info_widget = info_widget  # Store reference for resizeEvent
+        left_layout.addWidget(info_widget)
         left_layout.addStretch()
         
         # Center: Controls
@@ -188,7 +195,7 @@ class PlayerControls(QFrame):
         self.volume_slider = QSlider(Qt.Orientation.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(80)
-        self.volume_slider.setFixedWidth(120)
+        # Width will be set dynamically in resizeEvent
         self.volume_slider.setStyleSheet("""
             QSlider::groove:horizontal { 
                 height: 4px; 
@@ -215,10 +222,10 @@ class PlayerControls(QFrame):
         volume_layout.addWidget(self.volume_icon)
         volume_layout.addWidget(self.volume_slider)
         
-        # Add all sections to main layout
-        layout.addLayout(left_layout, 3)
-        layout.addLayout(controls_layout, 4)
-        layout.addLayout(volume_layout, 2)
+        # Add all sections to main layout with proportional stretch factors
+        layout.addLayout(left_layout, 15)
+        layout.addLayout(controls_layout, 75)
+        layout.addLayout(volume_layout, 10)
         
         # Network manager for artwork loading
         self.network_manager = QNetworkAccessManager()
@@ -315,3 +322,11 @@ class PlayerControls(QFrame):
                     self.parent.artist_name.setText("")
         
         return TrackInfoProxy(self)
+    
+    def resizeEvent(self, a0):
+        super().resizeEvent(a0)
+        total_width = self.width()
+        info_width = int(total_width * 0.20)
+        self._info_widget.setMaximumWidth(info_width)
+        volume_width = int(total_width * 0.20)
+        self.volume_slider.setFixedWidth(max(60, volume_width))

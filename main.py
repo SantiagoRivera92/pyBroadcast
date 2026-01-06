@@ -6,6 +6,7 @@ from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtCore import QUrl, QTimer, Qt
 
 from api.ibroadcast_api import iBroadcastAPI
+from api.queue_cache import QueueCache
 
 from ui.search_header import SearchHeader
 from ui.sidebar_navigation import SidebarNavigation
@@ -16,25 +17,28 @@ from ui.album_detail_view import AlbumDetailView
 from ui.playlist_detail_view import PlaylistDetailView
 from ui.queue_sidebar import QueueSidebar
 from ui.context_menus import TrackContextMenu
-from api.play_queue_websocket import PlayQueueWebSocket
 
 class iBroadcastNative(QMainWindow):
     def __init__(self):
         super().__init__()
         self.api = iBroadcastAPI()
+        self.queue_cache = QueueCache()
         self.media_player = QMediaPlayer()
         self.audio_output = QAudioOutput()
         self.media_player.setAudioOutput(self.audio_output)
         
         self.current_queue = []
-        self.current_index = 0
+        self.current_track_id = None
         self.shuffle_enabled = False
         self.repeat_mode = "off"
         
         self.current_album_id = None
         self.current_playlist_id = None
         
-        self.play_queue_ws = None
+        # Timer for updating queue cache position
+        self.cache_update_timer = QTimer()
+        self.cache_update_timer.timeout.connect(self.update_cache_position)
+        self.cache_update_timer.start(1000)  # Update every second
         
         self.init_ui()
         
@@ -193,7 +197,7 @@ class iBroadcastNative(QMainWindow):
             res = self.api.load_library()
             if res.get('success'):
                 self.load_home()
-                self.connect_play_queue()
+                self.restore_queue_from_cache()
         else:
             self.controls.track_info.setText("Login Required...")
             auth_res = self.api.start_oauth_flow()
@@ -214,7 +218,7 @@ class iBroadcastNative(QMainWindow):
                 if lib_res.get('success'):
                     self.load_home()
                     self.controls.track_info.setText("")
-                    self.connect_play_queue()
+                    self.restore_queue_from_cache()
                 else:
                     self.controls.track_info.setText("Failed to load library after login.")
             else:
@@ -247,7 +251,8 @@ class iBroadcastNative(QMainWindow):
 
     def load_artists(self):
         self.artists_view.clear()
-        artists = sorted(self.api.library['artists'].values(), key=lambda x: str(x.get('name', '')).lower())
+        artists = sorted(self.api.library['albumartists'].values(), key=lambda x: str(x.get('name', '')).lower())
+
         for artist in artists:
             artwork = self.api.get_artwork_url(artist.get('artwork_id'))
             self.artists_view.add_item(artist.get('name', 'Unknown'), "Artist", artwork, artist.get('item_id'))
@@ -267,12 +272,11 @@ class iBroadcastNative(QMainWindow):
         self.current_album_id = album_id
         self.current_playlist_id = None
         
-        album = self.api.library['albums'].get(str(album_id)) or self.api.library['albums'].get(album_id)
+        album = self.api.library['albums'].get(int(album_id)) or self.api.library['albums'].get(album_id)
         if not album:
-            print("Album not found:", album_id, type(album_id))
             return
         
-        artist = self.api.library['artists'].get(album.get('artist_id'))
+        artist = self.api.library['artists'].get(int(album.get('artist_id')))
         artist_name = artist.get('name', 'Unknown Artist') if artist else 'Unknown Artist'
         year = album.get('year', '') or album.get('release_date', '')
         artwork_url = self.api.get_artwork_url(album.get('artwork_id'))
@@ -291,7 +295,7 @@ class iBroadcastNative(QMainWindow):
         self.current_playlist_id = playlist_id
         self.current_album_id = None
         
-        playlist = self.api.library['playlists'].get(str(playlist_id)) or self.api.library['playlists'].get(playlist_id)
+        playlist = self.api.library['playlists'].get(int(playlist_id)) or self.api.library['playlists'].get(playlist_id)
         if not playlist:
             return
         
@@ -299,7 +303,7 @@ class iBroadcastNative(QMainWindow):
         
         artwork_url = ""
         if track_ids:
-            first_track = self.api.library['tracks'].get(str(track_ids[0]))
+            first_track = self.api.library['tracks'].get(int(track_ids[0]))
             if first_track and first_track.get('artwork_id'):
                 artwork_url = self.api.get_artwork_url(first_track['artwork_id'])
         
@@ -311,7 +315,7 @@ class iBroadcastNative(QMainWindow):
         
         tracks = []
         for track_id in track_ids:
-            track = self.api.library['tracks'].get(str(track_id))
+            track = self.api.library['tracks'].get(int(track_id))
             if track:
                 tracks.append(track)
         
@@ -329,7 +333,7 @@ class iBroadcastNative(QMainWindow):
             tracks = pl.get('tracks', [])
             if tracks:
                 first_track_id = tracks[0]
-                first_track = self.api.library['tracks'].get(str(first_track_id))
+                first_track = self.api.library['tracks'].get(int(first_track_id))
                 if first_track and first_track.get('artwork_id'):
                     artwork_url = self.api.get_artwork_url(first_track['artwork_id'])
             
@@ -366,17 +370,15 @@ class iBroadcastNative(QMainWindow):
         
         try:
             track_index = self._current_album_tracks.index(track_id)
-            tracks_to_queue = self._current_album_tracks[track_index:]
+            tracks_to_queue = self._current_album_tracks[track_index + 1:]
             
             self.current_queue = tracks_to_queue
-            self.current_index = 0
+            self.current_track_id = track_id
             
-            if self.play_queue_ws:
-                self.play_queue_ws.set_queue(tracks_to_queue, play_index=0)
-            else:
-                # If WebSocket not connected, manually update queue display
-                self.update_queue_display()
+            self.queue_cache.set_current_track(track_id, 0.0)
+            self.queue_cache.set_tracks(tracks_to_queue)
             
+            self.update_queue_display()
             self.play_track_by_id(track_id)
         except ValueError:
             pass
@@ -385,75 +387,69 @@ class iBroadcastNative(QMainWindow):
         if not hasattr(self, '_current_album_tracks') or row >= len(self._current_album_tracks):
             return
         
-        tracks_to_queue = self._current_album_tracks[row:]
+        track_id = self._current_album_tracks[row]
+        tracks_to_queue = self._current_album_tracks[row + 1:]
+        
         self.current_queue = tracks_to_queue
-        self.current_index = 0
+        self.current_track_id = track_id
         
-        if self.play_queue_ws:
-            self.play_queue_ws.set_queue(tracks_to_queue, play_index=0)
-        else:
-            self.update_queue_display()
+        self.queue_cache.set_current_track(track_id, 0.0)
+        self.queue_cache.set_tracks(tracks_to_queue)
         
-        self.play_track_by_id(self._current_album_tracks[row])
+        self.update_queue_display()
+        self.play_track_by_id(track_id)
     
     def add_track_to_queue_from_album(self, row, after_current=False):
         if not hasattr(self, '_current_album_tracks') or row >= len(self._current_album_tracks):
             return
         
         track_id = self._current_album_tracks[row]
-        
-        if after_current and self.play_queue_ws:
-            self.play_queue_ws.add_to_play_next([track_id])
-        elif self.play_queue_ws:
-            new_tracks = self.current_queue + [track_id]
-            self.play_queue_ws.update_state({'tracks': new_tracks})
+        self.queue_cache.add_track(track_id, after_current)
+        self.current_queue = self.queue_cache.tracks.copy()
+        self.update_queue_display()
     
     def play_track_from_playlist(self, track_id):
+        track_id = int(track_id)
         if not hasattr(self, '_current_playlist_tracks'):
             return
-        
         try:
             track_index = self._current_playlist_tracks.index(track_id)
-            tracks_to_queue = self._current_playlist_tracks[track_index:]
+            tracks_to_queue = self._current_playlist_tracks[track_index + 1:]
             
             self.current_queue = tracks_to_queue
-            self.current_index = 0
+            self.current_track_id = track_id
             
-            if self.play_queue_ws:
-                self.play_queue_ws.set_queue(tracks_to_queue, play_index=0)
-            else:
-                self.update_queue_display()
-            
+            self.queue_cache.set_current_track(track_id, 0.0)
+            self.queue_cache.set_tracks(tracks_to_queue)
+            self.update_queue_display()
             self.play_track_by_id(track_id)
-        except ValueError:
+        except ValueError as e:
             pass
     
     def play_track_from_playlist_at_row(self, row):
         if not hasattr(self, '_current_playlist_tracks') or row >= len(self._current_playlist_tracks):
             return
         
-        tracks_to_queue = self._current_playlist_tracks[row:]
+        track_id = self._current_playlist_tracks[row]
+        tracks_to_queue = self._current_playlist_tracks[row + 1:]
+        
         self.current_queue = tracks_to_queue
-        self.current_index = 0
+        self.current_track_id = track_id
         
-        if self.play_queue_ws:
-            self.play_queue_ws.set_queue(tracks_to_queue, play_index=0)
-        else:
-            self.update_queue_display()
+        self.queue_cache.set_current_track(track_id, 0.0)
+        self.queue_cache.set_tracks(tracks_to_queue)
         
-        self.play_track_by_id(self._current_playlist_tracks[row])
+        self.update_queue_display()
+        self.play_track_by_id(track_id)
     
     def add_track_to_queue_from_playlist(self, row, after_current=False):
         if not hasattr(self, '_current_playlist_tracks') or row >= len(self._current_playlist_tracks):
             return
         
         track_id = self._current_playlist_tracks[row]
-        
-        if after_current and self.play_queue_ws:
-            self.play_queue_ws.add_to_play_next([track_id])
-        elif self.play_queue_ws:
-            new_tracks = self.current_queue + [track_id]
-            self.play_queue_ws.update_state({'tracks': new_tracks})
+        self.queue_cache.add_track(track_id, after_current)
+        self.current_queue = self.queue_cache.tracks.copy()
+        self.update_queue_display()
 
     def play_track_by_id(self, track_id):
         track = None
@@ -473,6 +469,8 @@ class iBroadcastNative(QMainWindow):
             self.media_player.setSource(QUrl(url))
             self.media_player.play()
             
+            self.current_track_id = track_id
+            
             track_name = track.get('title', 'Unknown Track')
             artist_name = artist.get('name', 'Unknown Artist') if artist else 'Unknown Artist'
             artwork_url = self.api.get_artwork_url(track.get('artwork_id'))
@@ -480,77 +478,58 @@ class iBroadcastNative(QMainWindow):
             self.controls.set_track_info(track_name, artist_name, artwork_url)
             self.controls.set_playing(True)
             
-            if self.play_queue_ws:
-                self.play_queue_ws.set_current_track(track_id, track_name)
+            # Update cache with new track
+            self.queue_cache.set_current_track(track_id, 0.0)
+            self.update_queue_display()
 
     def toggle_play(self):
         if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.media_player.pause()
             self.controls.set_playing(False)
-            if self.play_queue_ws:
-                self.play_queue_ws.set_pause(True)
         else:
             self.media_player.play()
             self.controls.set_playing(True)
-            if self.play_queue_ws:
-                self.play_queue_ws.set_pause(False)
 
     def play_next(self):
-        if not self.current_queue:
-            return
-            
         if self.repeat_mode == "one":
             self.media_player.setPosition(0)
             self.media_player.play()
             return
         
-        self.current_index += 1
+        next_track = self.queue_cache.pop_next_track()
         
-        if self.current_index >= len(self.current_queue):
-            if self.repeat_mode == "all":
-                self.current_index = 0
-            else:
-                self.media_player.stop()
-                self.controls.set_playing(False)
-                return
-        
-        if not self.play_queue_ws:
-            self.update_queue_display()
-        
-        self.play_track_by_id(self.current_queue[self.current_index])
+        if next_track:
+            self.current_queue = self.queue_cache.tracks.copy()
+            self.play_track_by_id(next_track)
+        elif self.repeat_mode == "all" and self.current_track_id:
+            # If repeat all is on and we reach the end, we could restart from the beginning
+            # For now, just stop
+            self.media_player.stop()
+            self.controls.set_playing(False)
+        else:
+            self.media_player.stop()
+            self.controls.set_playing(False)
 
     def play_previous(self):
-        if not self.current_queue:
-            return
-        
+        # For simplicity, just restart the current track
         if self.media_player.position() > 3000:
             self.media_player.setPosition(0)
             return
         
-        self.current_index -= 1
-        if self.current_index < 0:
-            self.current_index = len(self.current_queue) - 1 if self.repeat_mode == "all" else 0
-        
-        if not self.play_queue_ws:
-            self.update_queue_display()
-        
-        self.play_track_by_id(self.current_queue[self.current_index])
+        # Could implement previous track logic here if needed
+        self.media_player.setPosition(0)
 
     def toggle_shuffle(self):
         self.shuffle_enabled = not self.shuffle_enabled
         self.controls.set_shuffle(self.shuffle_enabled)
-        if self.play_queue_ws:
-            self.play_queue_ws.set_shuffle(self.shuffle_enabled)
+        self.queue_cache.set_shuffle(self.shuffle_enabled)
 
     def toggle_repeat(self):
         modes = ["off", "all", "one"]
         current_idx = modes.index(self.repeat_mode)
         self.repeat_mode = modes[(current_idx + 1) % len(modes)]
         self.controls.set_repeat(self.repeat_mode)
-        
-        if self.play_queue_ws:
-            repeat_map = {'off': 'none', 'all': 'queue', 'one': 'track'}
-            self.play_queue_ws.set_repeat_mode(repeat_map[self.repeat_mode])
+        self.queue_cache.set_repeat_mode(self.repeat_mode)
 
     def set_volume(self, value):
         self.audio_output.setVolume(value / 100)
@@ -577,118 +556,118 @@ class iBroadcastNative(QMainWindow):
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
             self.play_next()
     
-    def connect_play_queue(self):
-        token = self.api.access_token
-        if token is not None:
-            self.play_queue_ws = PlayQueueWebSocket(
-                token, on_state_update=self.on_queue_state_update
-            )
-            self.play_queue_ws.connect()
+    def restore_queue_from_cache(self):
+        """Restore queue from cache when app starts"""
+        if self.queue_cache.load():
+
+            # Restore shuffle and repeat settings
+            self.shuffle_enabled = self.queue_cache.shuffle_enabled
+            self.repeat_mode = self.queue_cache.repeat_mode
+            self.controls.set_shuffle(self.shuffle_enabled)
+            self.controls.set_repeat(self.repeat_mode)
+            
+            # Rebuild queue
+            self.current_track_id = self.queue_cache.current_track
+            self.current_queue = self.queue_cache.tracks.copy()
+                        
+            # Optionally restore the current track (paused)
+            if self.current_track_id:
+                track = self.api.library['tracks'].get(int(self.current_track_id))
+                if track:
+                    artist = self.api.library['artists'].get(int(track.get('artist_id')))
+                    track_name = track.get('title', 'Unknown Track')
+                    artist_name = artist.get('name', 'Unknown Artist') if artist else 'Unknown Artist'
+                    artwork_url = self.api.get_artwork_url(track.get('artwork_id'))
+                    
+                    self.controls.set_track_info(track_name, artist_name, artwork_url)
+                    
+                    # Load the media but don't play
+                    url = self.api.get_stream_url(self.current_track_id)
+                    self.media_player.setSource(QUrl(url))
+                    
+                    # Seek to the saved position once media is loaded
+                    if self.queue_cache.current_position > 0:
+                        def seek_on_load():
+                            if self.media_player.duration() > 0:
+                                position_ms = int(self.queue_cache.current_position * 1000)
+                                self.media_player.setPosition(position_ms)
+                                self.media_player.mediaStatusChanged.disconnect(seek_on_load)
+                        
+                        self.media_player.mediaStatusChanged.connect(seek_on_load)
+            
+            # Update the queue display AFTER everything is loaded
+            self.update_queue_display()
     
-    def on_queue_state_update(self, state, role):
-        print("Received queue state update:", state)
-        self.current_queue = state.get('play_next', []) + state.get('tracks', [])
-        
-        tracks_data = []
-        for track_id in state.get('tracks', []):
-            track = self.api.library['tracks'].get(track_id)
-            if track:
-                artist = self.api.library['artists'].get(track.get('artist_id'))
-                tracks_data.append({
-                    'title': track.get('title', 'Unknown'),
-                    'artist': artist.get('name', 'Unknown Artist') if artist else 'Unknown Artist',
-                    'track_id': track_id
-                })
-        
-        play_next_data = []
-        for track_id in state.get('play_next', []):
-            track = self.api.library['tracks'].get(track_id)
-            if track:
-                artist = self.api.library['artists'].get(track.get('artist_id'))
-                play_next_data.append({
-                    'title': track.get('title', 'Unknown'),
-                    'artist': artist.get('name', 'Unknown Artist') if artist else 'Unknown Artist',
-                    'track_id': track_id
-                })
-        
-        play_index = state.get('data', {}).get('play_index', 0)
-        play_from = state.get('data', {}).get('play_from', 'tracks')
-        self.queue_sidebar.set_queue(tracks_data, play_next_data, play_index, play_from)
-        
-        repeat_mode = state.get('data', {}).get('repeat_mode', 'none')
-        if repeat_mode == 'none':
-            self.repeat_mode = 'off'
-        elif repeat_mode == 'queue':
-            self.repeat_mode = 'all'
-        elif repeat_mode == 'track':
-            self.repeat_mode = 'one'
-        self.controls.set_repeat(self.repeat_mode)
-        
-        self.shuffle_enabled = state.get('shuffle', False)
-        self.controls.set_shuffle(self.shuffle_enabled)
-        
-        if role == 'controller':
-            print("This client is a controller")
+    def update_cache_position(self):
+        """Update cache with current playback position (called every second)"""
+        if self.current_track_id and self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            position_sec = self.media_player.position() / 1000.0
+            self.queue_cache.update_position(position_sec)
     
     def play_track_from_queue(self, index):
-        play_next_count = len(self.queue_sidebar.play_next_data)
-        
-        if index < play_next_count:
-            track_id = self.queue_sidebar.play_next_data[index]['track_id']
-            if self.play_queue_ws:
-                new_play_next = self.play_queue_ws.state['play_next'][index:]
-                self.play_queue_ws.update_state({'play_next': new_play_next})
-        else:
-            tracks_index = index - play_next_count
-            track_id = self.queue_sidebar.tracks_data[tracks_index]['track_id']
-            if self.play_queue_ws:
-                self.play_queue_ws.update_state({
-                    'data': {
-                        **self.play_queue_ws.state['data'],
-                        'play_index': tracks_index,
-                        'play_from': 'tracks'
-                    }
-                })
-        
-        self.play_track_by_id(track_id)
+        """Play a track from the queue at the given index"""
+        if 0 <= index < len(self.current_queue):
+            track_id = self.current_queue[index]
+            
+            # Update queue to start from this track
+            remaining_tracks = self.current_queue[index + 1:]
+            self.queue_cache.set_current_track(track_id, 0.0)
+            self.queue_cache.set_tracks(remaining_tracks)
+            self.current_queue = remaining_tracks
+            
+            self.play_track_by_id(track_id)
     
     def remove_from_queue(self, index, is_play_next):
-        if self.play_queue_ws:
-            self.play_queue_ws.remove_from_queue(index, is_play_next)
+        """Remove a track from the queue"""
+        self.queue_cache.remove_track(index)
+        self.current_queue = self.queue_cache.tracks.copy()
+        self.update_queue_display()
     
     def clear_queue(self):
-        if self.play_queue_ws:
-            self.play_queue_ws.clear_queue()
+        """Clear the entire queue"""
+        self.queue_cache.clear()
+        self.current_queue = []
+        self.current_track_id = None
         self.media_player.stop()
         self.controls.set_playing(False)
+        self.update_queue_display()
     
     def update_queue_display(self):
-        """Manually update queue display when WebSocket is not connected"""
-        print("Updating queue display manually")
-        if not self.current_queue:
-            print("Current queue is empty")
-            self.queue_sidebar.set_queue([], [], 0, 'tracks')
-            return
+        """Update the queue sidebar display"""
         
         tracks_data = []
-        for track_id in self.current_queue:
-            track = self.api.library['tracks'].get(str(track_id))
+        
+        # First, add the currently playing track
+        if self.current_track_id:
+            track = self.api.library['tracks'].get(int(self.current_track_id)) or self.api.library['tracks'].get(int(self.current_track_id))
             if track:
-                artist = self.api.library['artists'].get(track.get('artist_id'))
+                artist = self.api.library['artists'].get(int(track.get('artist_id')))
                 tracks_data.append({
                     'title': track.get('title', 'Unknown'),
                     'artist': artist.get('name', 'Unknown Artist') if artist else 'Unknown Artist',
-                    'track_id': track_id
+                    'track_id': self.current_track_id,
+                    'is_current': True
                 })
-        print("Prepared", len(tracks_data), "tracks for queue display")
-        self.queue_sidebar.set_queue(tracks_data, [], self.current_index, 'tracks')
+        
+        # Then add upcoming tracks from the queue
+        for track_id in self.current_queue:
+            track = self.api.library['tracks'].get(int(track_id))
+            if track:
+                artist = self.api.library['artists'].get(int(track.get('artist_id')))
+                tracks_data.append({
+                    'title': track.get('title', 'Unknown'),
+                    'artist': artist.get('name', 'Unknown Artist') if artist else 'Unknown Artist',
+                    'track_id': track_id,
+                    'is_current': False
+                })
+        
+        self.queue_sidebar.set_queue(tracks_data, [], 0, 'tracks')
     
     def reorder_queue(self, old_index, new_index):
-        if self.play_queue_ws:
-            tracks = self.play_queue_ws.state['tracks'].copy()
-            track = tracks.pop(old_index)
-            tracks.insert(new_index, track)
-            self.play_queue_ws.update_state({'tracks': tracks})
+        """Reorder tracks in the queue"""
+        self.queue_cache.reorder_tracks(old_index, new_index)
+        self.current_queue = self.queue_cache.tracks.copy()
+        self.update_queue_display()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

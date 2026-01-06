@@ -127,12 +127,12 @@ class iBroadcastAPI:
                                 album['artwork_id'] = track['artwork_id']
                                 break
 
-                # Remove artists with no albums assigned
+                # Create AlbumArtists (for artists that have at least one album)
                 album_artist_ids = set()
                 for album in self.library['albums'].values():
                     if isinstance(album, dict) and 'artist_id' in album:
                         album_artist_ids.add(album['artist_id'])
-                self.library['artists'] = {aid: artist for aid, artist in self.library['artists'].items() if aid in album_artist_ids}
+                self.library['albumartists'] = {aid: artist for aid, artist in self.library['artists'].items() if aid in album_artist_ids}
 
                 # Sort albums by artist and release date
                 self.library['albums'] = dict(sorted(

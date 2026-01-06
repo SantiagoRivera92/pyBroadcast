@@ -8,5 +8,5 @@ class ClickableImage(QLabel):
         self.item_id = item_id
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
-    def mousePressEvent(self, event):
+    def mousePressEvent(self, ev):
         self.callback(self.item_id)
