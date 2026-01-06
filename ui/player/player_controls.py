@@ -5,7 +5,8 @@ from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PyQt6.QtCore import QUrl
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtGui import QPainter
-from ui.scrolling_label import ScrollingLabel
+
+from ui.utils.scrolling_label import ScrollingLabel
 
 class SvgButton(QPushButton):
     def __init__(self, svg_path, size=24, parent=None):

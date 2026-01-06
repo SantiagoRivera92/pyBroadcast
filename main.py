@@ -10,16 +10,16 @@ from api.ibroadcast_api import iBroadcastAPI
 from api.queue_cache import QueueCache
 from api.lastfm_api import LastFMAPI
 
-from ui.search_header import SearchHeader
-from ui.sidebar_navigation import SidebarNavigation
-from ui.library_grid import LibraryGrid
-from ui.player_controls import PlayerControls
-from ui.artist_header import ArtistHeader
-from ui.album_detail_view import AlbumDetailView
-from ui.playlist_detail_view import PlaylistDetailView
-from ui.queue_sidebar import QueueSidebar
-from ui.context_menus import TrackContextMenu
-from ui.options_dialog import OptionsDialog
+from ui.search.search_header import SearchHeader
+from ui.navigation.sidebar_navigation import SidebarNavigation
+from ui.grid.library_grid import LibraryGrid
+from ui.player.player_controls import PlayerControls
+from ui.artist.artist_header import ArtistHeader
+from ui.album.album_detail_view import AlbumDetailView
+from ui.playlist.playlist_detail_view import PlaylistDetailView
+from ui.queue.queue_sidebar import QueueSidebar
+from ui.utils.context_menus import TrackContextMenu
+from ui.utils.options_dialog import OptionsDialog
 
 class iBroadcastNative(QMainWindow):
     def __init__(self):

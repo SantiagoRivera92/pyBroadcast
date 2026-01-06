@@ -1,9 +1,8 @@
 from PyQt6.QtWidgets import (QFrame, QVBoxLayout, QLabel, QListWidget, 
                              QListWidgetItem, QPushButton, QHBoxLayout, QWidget, QSizePolicy)
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont, QDrag
-from PyQt6.QtCore import QMimeData
-from ui.scrolling_label import ScrollingLabel
+
+from ui.utils.scrolling_label import ScrollingLabel
 
 class QueueItem(QWidget):
     removeRequested = pyqtSignal(int)
