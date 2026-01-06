@@ -21,3 +21,6 @@ token.json
 
 # Windows system files
 Thumbs.db
+
+# Cache directory
+cache/

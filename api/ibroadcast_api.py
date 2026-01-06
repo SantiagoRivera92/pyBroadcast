@@ -11,6 +11,7 @@ from http.server import HTTPServer
 from urllib.parse import urlencode, quote
 from typing import Dict, Optional
 from api.oauth_callback_handler import OAuthCallbackHandler
+from api.artwork_cache import ArtworkCache
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -32,10 +33,14 @@ class iBroadcastAPI:
         self.base_url = "https://api.ibroadcast.com"
         self.library_url = "https://library.ibroadcast.com"
         self.streaming_server = "https://streaming.ibroadcast.com"
-        self.access_token = None
-        self.refresh_token = None
+        self.access_token: Optional[str] = None
+        self.refresh_token: Optional[str] = None
         self.session = requests.Session()
         self.library = {'artists': {}, 'albums': {}, 'tracks': {}, 'playlists': {}}
+        
+        # Initialize artwork cache
+        self.artwork_cache = ArtworkCache()
+        
         self.load_cached_token()
 
     def load_cached_token(self):
@@ -139,10 +144,34 @@ class iBroadcastAPI:
                 ))
 
                 self.save_token()
+                
+                # Start pre-caching artworks in background
+                threading.Thread(target=self._precache_artworks, daemon=True).start()
+                
                 return {'success': True}
             return {'success': False}
         except Exception as e:
             return {'success': False, 'message': str(e)}
+    
+    def _precache_artworks(self):
+        """Background task to pre-cache all artworks"""
+        print("Starting artwork pre-caching...")
+        
+        # Cache album artworks (most important)
+        for album in self.library['albums'].values():
+            artwork_id = album.get('artwork_id')
+            if artwork_id and not self.artwork_cache.is_cached(artwork_id):
+                artwork_url = f"https://artwork.ibroadcast.com/artwork/{artwork_id}"
+                self.artwork_cache.download_and_cache(artwork_url, artwork_id)
+        
+        # Cache artist artworks
+        for artist in self.library['artists'].values():
+            artwork_id = artist.get('artwork_id')
+            if artwork_id and not self.artwork_cache.is_cached(artwork_id):
+                artwork_url = f"https://artwork.ibroadcast.com/artwork/{artwork_id}"
+                self.artwork_cache.download_and_cache(artwork_url, artwork_id)
+        
+        print(f"Artwork caching complete. Cached {self.artwork_cache.get_cache_count()} images.")
         
     def generate_pkce_pair(self):
         """Generate PKCE code_verifier and code_challenge"""
@@ -308,8 +337,27 @@ class iBroadcastAPI:
         
         return stream_url
     
-    def get_artwork_url(self, artwork_id: Optional[str]) -> str:
-        """Get artwork URL"""
+    def get_artwork_url(self, artwork_id: Optional[str], use_cache: bool = True) -> str:
+        """Get artwork URL, checking cache first if enabled"""
         if not artwork_id:
             return ""
+        
+        # Check cache first if enabled
+        if use_cache:
+            cached_url = self.artwork_cache.get_cached_url(artwork_id)
+            if cached_url:
+                return cached_url
+        
+        # Return remote URL
         return f"https://artwork.ibroadcast.com/artwork/{artwork_id}"
+    
+    def get_cache_stats(self) -> Dict:
+        """Get cache statistics"""
+        return {
+            'count': self.artwork_cache.get_cache_count(),
+            'size_mb': self.artwork_cache.get_cache_size() / (1024 * 1024)
+        }
+    
+    def clear_cache(self):
+        """Clear artwork cache"""
+        self.artwork_cache.clear_cache()

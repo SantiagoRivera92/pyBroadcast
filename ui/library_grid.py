@@ -14,37 +14,101 @@ class LibraryGrid(QScrollArea):
         self.container.setStyleSheet("background-color: #121212;")
         self.grid = QGridLayout(self.container)
         self.grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.grid.setSpacing(20)
+        self.grid.setContentsMargins(20, 20, 20, 20)
         self.setWidget(self.container)
         
         self.callback = item_click_callback
         self.network_manager = QNetworkAccessManager()
         
+        # Item dimensions for column calculation
+        self.item_width = 160
+        self.item_spacing = 20
+        self.margin = 20
+        
         # Priority Loading State
         self.pending_items = [] # List of (label, url)
         self.active_requests = 0
-        self.max_concurrent = 4 # Adjust based on your connection speed
+        self.max_concurrent = 4
+        
+        # Queue for items to add
+        self.items_queue = []
+        self.current_row = 0
+        self.current_col = 0
+        self.columns = 5  # Default, will be recalculated
         
         # Debounce timer for scroll events
         self.load_timer = QTimer()
         self.load_timer.setSingleShot(True)
         self.load_timer.timeout.connect(self.process_queue)
         
-        # Connect to scrollbar movement
-        self.verticalScrollBar().valueChanged.connect(lambda: self.load_timer.start(200))
+        # Connect to scrollbar movement if verticalScrollBar exists
+        v_scrollbar = self.verticalScrollBar()
+        if v_scrollbar is not None:
+            v_scrollbar.valueChanged.connect(lambda: self.load_timer.start(200))
+
+    def calculate_columns(self):
+        """Calculate how many columns can fit in the current width"""
+        viewport = self.viewport()
+        if viewport is None:
+            available_width = 0
+        else:
+            available_width = viewport.width() - (2 * self.margin)
+        cols = max(1, available_width // (self.item_width + self.item_spacing))
+        return cols
 
     def clear(self):
         self.pending_items.clear()
+        self.items_queue.clear()
+        self.current_row = 0
+        self.current_col = 0
         for i in reversed(range(self.grid.count())): 
             item = self.grid.itemAt(i)
-            if item and item.widget():
-                item.widget().deleteLater()
+            if item:
+                item_widget = item.widget()
+                if item_widget:
+                    item_widget.deleteLater()
 
-    def add_item(self, title, subtitle, image_url, item_id, row, col):
+    def add_item(self, title, subtitle, image_url, item_id, row=None, col=None):
+        """Add item to grid. If row/col are None, auto-calculate based on current position"""
+        # Queue the item for processing
+        self.items_queue.append({
+            'title': title,
+            'subtitle': subtitle,
+            'image_url': image_url,
+            'item_id': item_id
+        })
+        
+        # Process queue on next event loop
+        QTimer.singleShot(0, self.process_items_queue)
+
+    def process_items_queue(self):
+        """Process queued items and add them to the grid"""
+        if not self.items_queue:
+            return
+        
+        # Recalculate columns based on current width
+        self.columns = self.calculate_columns()
+        
+        # Add all queued items
+        while self.items_queue:
+            item_data = self.items_queue.pop(0)
+            self._add_item_to_grid(
+                item_data['title'],
+                item_data['subtitle'],
+                item_data['image_url'],
+                item_data['item_id']
+            )
+
+    def _add_item_to_grid(self, title, subtitle, image_url, item_id):
+        """Internal method to add item to grid at current position"""
         item_widget = QWidget()
         layout = QVBoxLayout(item_widget)
+        layout.setSpacing(5)
+        layout.setContentsMargins(0, 0, 0, 0)
         
         img_label = ClickableImage(self.callback, item_id)
-        img_label.setFixedSize(160, 160)
+        img_label.setFixedSize(self.item_width, self.item_width)
         img_label.setStyleSheet("background-color: #282828; border-radius: 8px;")
         img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
@@ -55,22 +119,40 @@ class LibraryGrid(QScrollArea):
         t_label = QLabel(title)
         t_label.setStyleSheet("color: white; font-weight: bold; margin-top: 5px;")
         t_label.setWordWrap(True)
-        t_label.setFixedWidth(160)
+        t_label.setFixedWidth(self.item_width)
+        
+        s_label = QLabel(subtitle)
+        s_label.setStyleSheet("color: #b3b3b3; font-size: 12px;")
+        s_label.setWordWrap(True)
+        s_label.setFixedWidth(self.item_width)
         
         layout.addWidget(img_label)
         layout.addWidget(t_label)
-        layout.addWidget(QLabel(subtitle, styleSheet="color: #b3b3b3; font-size: 12px;"))
-        self.grid.addWidget(item_widget, row, col)
+        layout.addWidget(s_label)
+        
+        # Add to grid at current position
+        self.grid.addWidget(item_widget, self.current_row, self.current_col)
+        
+        # Update position for next item
+        self.current_col += 1
+        if self.current_col >= self.columns:
+            self.current_col = 0
+            self.current_row += 1
         
         # Trigger an initial check
         self.load_timer.start(100)
 
     def is_visible(self, widget):
         """Check if the widget is within the visible area of the scroll area"""
-        visible_region = self.viewport().rect()
-        # Map widget coordinates to the viewport
-        widget_rect = widget.mapTo(self.viewport(), widget.rect().topLeft())
-        return visible_region.intersects(QRect(widget_rect, widget.size()))
+        try:
+            viewport = self.viewport()
+            if viewport is not None:        
+                visible_region = viewport.rect()
+                widget_rect = widget.mapTo(viewport, widget.rect().topLeft())
+                return visible_region.intersects(QRect(widget_rect, widget.size()))
+            return False
+        except RuntimeError:
+            return False
 
     def process_queue(self):
         """Sorts the queue by visibility and starts downloads"""
@@ -82,7 +164,8 @@ class LibraryGrid(QScrollArea):
         off_screen = []
 
         for item in self.pending_items:
-            if item['started']: continue
+            if item['started']: 
+                continue
             
             try:
                 if self.is_visible(item['label']):
@@ -90,16 +173,14 @@ class LibraryGrid(QScrollArea):
                 else:
                     off_screen.append(item)
             except RuntimeError:
-                continue # Widget was deleted
+                continue
 
         # Priority 1: Start on-screen items
         for item in on_screen:
             if self.active_requests < self.max_concurrent:
                 self.start_download(item)
         
-        # Priority 2: Only start off-screen if all on-screen are ALREADY finished
-        # and we still have capacity. (Based on your prompt: "Only load off-screen 
-        # when every image on screen has finished loading")
+        # Priority 2: Only start off-screen if all on-screen are finished
         if not on_screen and self.active_requests == 0:
             for item in off_screen:
                 if self.active_requests < self.max_concurrent:
@@ -110,12 +191,12 @@ class LibraryGrid(QScrollArea):
         self.active_requests += 1
         request = QNetworkRequest(QUrl(item['url']))
         reply = self.network_manager.get(request)
-        reply.finished.connect(lambda r=reply, lbl=item['label']: self.on_finished(lbl, r))
+        if reply is not None:
+            reply.finished.connect(lambda r=reply, lbl=item['label']: self.on_finished(lbl, r))
 
     def on_finished(self, label, reply):
         self.active_requests -= 1
         self.set_image(label, reply)
-        # Check queue again to see if we can start next items
         self.process_queue()
 
     def set_image(self, label, reply):
@@ -129,7 +210,7 @@ class LibraryGrid(QScrollArea):
                 pixmap = QPixmap.fromImage(img)
                 if not pixmap.isNull():
                     label.setPixmap(pixmap.scaled(
-                        160, 160, 
+                        self.item_width, self.item_width, 
                         Qt.AspectRatioMode.KeepAspectRatioByExpanding, 
                         Qt.TransformationMode.SmoothTransformation
                     ))
@@ -138,6 +219,38 @@ class LibraryGrid(QScrollArea):
         finally:
             reply.deleteLater()
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
+    def resizeEvent(self, a0):
+        super().resizeEvent(a0)
+        # Recalculate layout when window is resized
+        new_columns = self.calculate_columns()
+        if new_columns != self.columns and self.grid.count() > 0:
+            self.columns = new_columns
+            # Re-layout existing items
+            self._relayout_items()
         self.load_timer.start(200)
+    
+    def _relayout_items(self):
+        """Re-arrange grid items when column count changes"""
+        items = []
+        for i in range(self.grid.count()):
+            item = self.grid.itemAt(i)
+            if item and item.widget():
+                items.append(item.widget())
+        
+        # Remove all items from grid (but don't delete them)
+        for item in items:
+            self.grid.removeWidget(item)
+        
+        # Re-add items with new layout
+        for i, widget in enumerate(items):
+            row = i // self.columns
+            col = i % self.columns
+            self.grid.addWidget(widget, row, col)
+        
+        # Update current position
+        if items:
+            self.current_row = (len(items) - 1) // self.columns
+            self.current_col = (len(items) - 1) % self.columns + 1
+            if self.current_col >= self.columns:
+                self.current_col = 0
+                self.current_row += 1
