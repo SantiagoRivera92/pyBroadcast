@@ -1,10 +1,12 @@
 import sys
 import webbrowser
+import os
+
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QStackedWidget, QMessageBox, QMenuBar)
+                             QHBoxLayout, QStackedWidget, QPushButton)
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtCore import QUrl, QTimer, Qt
-from PyQt6.QtGui import QAction
+from PyQt6.QtGui import QAction, QIcon,QFontDatabase, QFont
 
 from src.api.ibroadcast.ibroadcast_api import iBroadcastAPI
 from src.api.queue_cache import QueueCache
@@ -110,7 +112,7 @@ class iBroadcastNative(QMainWindow):
                 self.handle_search(prev['query'])
                 
     def init_ui(self):
-        self.setWindowTitle("iBroadcast Native")
+        self.setWindowTitle("pyBroadcast")
         self.resize(1400, 900)
         
         # Add menu bar - NEW
@@ -127,10 +129,22 @@ class iBroadcastNative(QMainWindow):
         top_bar_layout.setContentsMargins(0, 0, 0, 0)
         top_bar_layout.setSpacing(0)
 
-        from PyQt6.QtWidgets import QPushButton
-        self.back_btn = QPushButton("←")
-        self.back_btn.setFixedWidth(40)
+
+        self.back_btn = QPushButton()
+        self.back_btn.setIcon(QIcon.fromTheme("go-previous"))
+        self.back_btn.setFixedSize(36, 36)
         self.back_btn.setToolTip("Back")
+        self.back_btn.setStyleSheet('''
+            QPushButton {
+                border-radius: 18px;
+                background: transparent;
+                border: none;
+                margin: 4px;
+            }
+            QPushButton:hover {
+                background: #333333;
+            }
+        ''')
         self.back_btn.clicked.connect(self.go_back)
         top_bar_layout.addWidget(self.back_btn)
 
@@ -319,11 +333,16 @@ class iBroadcastNative(QMainWindow):
 
         for aid, album in self.api.library['albums'].items():
             if query in str(album.get('name', '')).lower():
-                results.append((album.get('name'), "Album", self.api.get_artwork_url(album.get('artwork_id')), aid))
+                artist_id = album.get('artist_id')
+                artist = self.api.library['artists'].get(int(artist_id)) if artist_id else None
+                artist_name = "Album by " + artist.get('name') if artist else "Album"
+                results.append((album.get('name'), artist_name, self.api.get_artwork_url(album.get('artwork_id')), aid))
 
         for tid, track in self.api.library['tracks'].items():
             if query in str(track.get('title', '')).lower():
-                results.append((track.get('title'), "Song", self.api.get_artwork_url(track.get('artwork_id')), tid))
+                artist = self.api.library['artists'].get(int(track.get('artist_id'))) if track.get('artist_id') else None
+                artist_name = "Track by " + artist.get('name') if artist else "Track"
+                results.append((track.get('title'), artist_name, self.api.get_artwork_url(track.get('artwork_id')), tid))
 
         self.search_results_view.clear()
         for title, subtitle, image_url, item_id in results:
@@ -394,7 +413,13 @@ class iBroadcastNative(QMainWindow):
         for artist in artists:
             artwork = self.api.get_artwork_url(artist.get('artwork_id'))
             self.artists_view.add_item(artist.get('name', 'Unknown'), "Artist", artwork, artist.get('item_id'))
-
+    
+    def album_sort_key(self, x):
+        artist = self.api.library['artists'].get(int(x.get('artist_id')))
+        artist_name = artist.get('name', '').lower() if artist else ''
+        year = x.get('year') or 0
+        return (artist_name, year)
+    
     def load_albums(self, artist_id=None):
         self.content_stack.setCurrentWidget(self.albums_view)
         self.artist_header.setVisible(self._showing_artist_albums)
@@ -403,17 +428,14 @@ class iBroadcastNative(QMainWindow):
         if artist_id:
             albums = [a for a in albums if int(a.get('artist_id')) == int(artist_id)]
         albums_list = list(albums)
-        if artist_id:
-            albums_list.sort(key=lambda x: (x.get('year') or 0, str(x.get('name', '')).lower()))
+        albums_list.sort(key=self.album_sort_key)
         for album in albums_list:
             artwork = self.api.get_artwork_url(album.get('artwork_id'))
             artist = self.api.library['artists'].get(int(album.get('artist_id')))
             artist_name = artist.get('name', 'Unknown Artist') if artist else 'Unknown Artist'
             year = album.get('year', 0)
             subtitle = f"{artist_name}"
-            if year:
-                subtitle += f" • {year}"
-            self.albums_view.add_item(album.get('name'), subtitle, artwork, album.get('item_id'))
+            self.albums_view.add_item(album.get('name'), subtitle, artwork, album.get('item_id'), year if year and year > 0 else None)
 
     def show_album_detail(self, album_id, push_to_stack=True):
         album_id = int(album_id)
@@ -915,6 +937,14 @@ class iBroadcastNative(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    # Load NataSans font
+    font_path = os.path.join(os.path.dirname(__file__), "assets", "font", "NataSans.ttf")
+    font_id = QFontDatabase.addApplicationFont(font_path)
+    if font_id != -1:
+        family = QFontDatabase.applicationFontFamilies(font_id)[0]
+        app.setFont(QFont(family))
+    else:
+        print("Warning: Could not load NataSans.ttf font.")
     window = iBroadcastNative()
     window.show()
     sys.exit(app.exec())

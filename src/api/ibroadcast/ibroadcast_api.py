@@ -109,6 +109,8 @@ class iBroadcastAPI:
                                 if isinstance(index, int):
                                     if index < len(item_data):
                                         obj[key] = item_data[index]
+                                elif key != "artists_additional_map":
+                                    print(f"Unexpected index type for key {key}: {index}")
                             obj['item_id'] = item_id
                             processed[int(item_id)] = obj
                         elif isinstance(item_data, dict):

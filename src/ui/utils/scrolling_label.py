@@ -10,9 +10,10 @@ class ScrollingLabel(QLabel):
         super().__init__(parent)
         self.full_text = ""
         self.scroll_offset = 0
+        self.scroll_direction = 1  # 1 for left, -1 for right
         self.scroll_timer = QTimer(self)
         self.scroll_timer.timeout.connect(self.scroll_text)
-        self.scroll_speed = 30 
+        self.scroll_speed = 25
         self.wait_time = 2000  
         self.wait_timer = QTimer(self)
         self.wait_timer.timeout.connect(self.start_scrolling)
@@ -45,8 +46,8 @@ class ScrollingLabel(QLabel):
             return
         fm = QFontMetrics(self.font())
         text_width = fm.horizontalAdvance(self.full_text)
-        available_width = self.width()
-        self.needs_scroll = text_width > available_width
+        available_width = self.width() - 10  # Slight padding
+        self.needs_scroll = text_width >= available_width
         if self.needs_scroll:
             self.start_scrolling()
         else:
@@ -54,10 +55,14 @@ class ScrollingLabel(QLabel):
             super().setText(self.full_text)
     
     def start_scrolling(self):
-        """Start the scrolling animation"""
+        """Start the scrolling animation or resume after pause at ends"""
         self.wait_timer.stop()
         if self.needs_scroll and not self.is_scrolling:
             self.is_scrolling = True
+            self.scroll_direction = 1
+            self.scroll_timer.start(self.scroll_speed)
+        elif self.needs_scroll and self.is_scrolling:
+            # Resume scrolling after pause
             self.scroll_timer.start(self.scroll_speed)
     
     def stop_scrolling(self):
@@ -67,21 +72,39 @@ class ScrollingLabel(QLabel):
             self.scroll_timer.stop()
             self.wait_timer.stop()
             self.scroll_offset = 0
+            self.scroll_direction = 1
             self.update()
     
     def scroll_text(self):
-        """Update scroll position"""
+        """Update scroll position for back-and-forth scrolling with pause at ends"""
         if not self.needs_scroll:
             return
         fm = QFontMetrics(self.font())
         text_width = fm.horizontalAdvance(self.full_text)
-        self.scroll_offset += 1
-        if self.scroll_offset > text_width + self.gap:
+        available_width = self.width()
+
+        # Calculate max offset so last character is fully visible
+        max_offset = text_width - available_width if text_width > available_width else 0
+        if max_offset < 0:
+            max_offset = 0
+
+        self.scroll_offset += self.scroll_direction
+
+        if self.scroll_offset >= max_offset:
+            self.scroll_offset = max_offset
+            self.scroll_direction = -1
+            self.scroll_timer.stop()
+            self.wait_timer.start(1000) 
+        elif self.scroll_offset <= 0:
             self.scroll_offset = 0
+            self.scroll_direction = 1
+            self.scroll_timer.stop()
+            self.wait_timer.start(1000)
+
         self.update()
     
     def paintEvent(self, a0):
-        """Custom paint to draw scrolling text"""
+        """Custom paint to draw scrolling text (back-and-forth)"""
         if not self.needs_scroll or not self.is_scrolling:
             super().paintEvent(a0)
             return
@@ -90,9 +113,7 @@ class ScrollingLabel(QLabel):
         painter.setFont(self.font())
         x = -self.scroll_offset
         y = self.height() // 2 + painter.fontMetrics().ascent() // 2
-        text_width = painter.fontMetrics().horizontalAdvance(self.full_text)
         painter.drawText(x, y, self.full_text)
-        painter.drawText(x + text_width + self.gap, y, self.full_text)
         painter.end()
     
     def resizeEvent(self, a0):

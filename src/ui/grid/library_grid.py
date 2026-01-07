@@ -74,14 +74,15 @@ class LibraryGrid(QScrollArea):
                 if item_widget:
                     item_widget.deleteLater()
 
-    def add_item(self, title, subtitle, image_url, item_id, row=None, col=None):
+    def add_item(self, title, subtitle, image_url, item_id, second_subtitle=None, row=None, col=None):
         """Add item to grid. If row/col are None, auto-calculate based on current position"""
         # Queue the item for processing
         self.items_queue.append({
             'title': title,
             'subtitle': subtitle,
             'image_url': image_url,
-            'item_id': item_id
+            'item_id': item_id,
+            'second_subtitle': second_subtitle
         })
         
         # Process queue on next event loop
@@ -102,10 +103,11 @@ class LibraryGrid(QScrollArea):
                 item_data['title'],
                 item_data['subtitle'],
                 item_data['image_url'],
-                item_data['item_id']
+                item_data['item_id'],
+                item_data['second_subtitle']
             )
 
-    def _add_item_to_grid(self, title, subtitle, image_url, item_id):
+    def _add_item_to_grid(self, title, subtitle, image_url, item_id, second_subtitle=None):
         """Internal method to add item to grid at current position"""
         item_widget = HoverableWidget(self.callback, item_id)
         layout = QVBoxLayout(item_widget)
@@ -145,10 +147,26 @@ class LibraryGrid(QScrollArea):
         ''')
         s_label.setWordWrap(True)
         s_label.setFixedWidth(self.item_width + 2)
-
+    
         layout.addWidget(img_label)
         layout.addWidget(t_label)
         layout.addWidget(s_label)
+        
+        if second_subtitle:
+            ss_label = ScrollingLabel(item_widget)
+            ss_label.setText(str(second_subtitle))
+            ss_label.setGap(25)
+            ss_label.setStyleSheet('''
+                QLabel {
+                    color: #b3b3b3;
+                    font-size: 14px;
+                    margin-left: 2px;
+                }
+            ''')
+            ss_label.setWordWrap(True)
+            ss_label.setFixedWidth(self.item_width + 2)
+            layout.addWidget(ss_label)
+
         
         # Add to grid at current position
         self.grid.addWidget(item_widget, self.current_row, self.current_col)

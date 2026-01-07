@@ -105,12 +105,12 @@ class PlayerControls(QFrame):
         self.track_name.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         self.album_name = ScrollingLabel(info_widget)
         self.album_name.setText("")
-        self.album_name.setStyleSheet("background: transparent; color: #b3b3b3; font-size: 13px; border: none; padding: 0; text-decoration: underline; cursor: pointer;")
+        self.album_name.setStyleSheet("background: transparent; color: #b3b3b3; font-size: 13px; border: none; padding: 0; text-decoration: underline;")
         self.album_name.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         self.album_name.onClickCallback = self._on_album_clicked
         self.artist_name = ScrollingLabel(info_widget)
         self.artist_name.setText("")
-        self.artist_name.setStyleSheet("background: transparent; color: #b3b3b3; font-size: 13px; border: none; padding: 0; text-decoration: underline; cursor: pointer;")
+        self.artist_name.setStyleSheet("background: transparent; color: #b3b3b3; font-size: 13px; border: none; padding: 0; text-decoration: underline; ")
         self.artist_name.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         self.artist_name.onClickCallback = self._on_artist_clicked
         info_layout.addWidget(self.track_name)
@@ -264,9 +264,9 @@ class PlayerControls(QFrame):
         self.artist_id = artist_id
         self.is_albumartist = is_albumartist
         if is_albumartist:
-            self.artist_name.setStyleSheet("background: transparent; color: #b3b3b3; font-size: 13px; border: none; padding: 0; text-decoration: underline; cursor: pointer;")
+            self.artist_name.setStyleSheet("background: transparent; color: #b3b3b3; font-size: 13px; border: none; padding: 0; text-decoration: underline;")
         else:
-            self.artist_name.setStyleSheet("background: transparent; color: #b3b3b3; font-size: 13px; border: none; padding: 0; text-decoration: none; cursor: default;")
+            self.artist_name.setStyleSheet("background: transparent; color: #b3b3b3; font-size: 13px; border: none; padding: 0; text-decoration: none;")
 
         
         if artwork_url:

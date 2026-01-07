@@ -166,7 +166,7 @@ class QueueSidebar(QFrame):
             QPushButton {
                 background: none;
                 border: 1px solid #5DADE2;
-                color: #5DADE2;F
+                color: #5DADE2;
                 padding: 6px 12px;
                 border-radius: 4px;
                 font-size: 12px;
