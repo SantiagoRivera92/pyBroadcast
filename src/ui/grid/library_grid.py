@@ -3,9 +3,9 @@ from PyQt6.QtWidgets import QScrollArea, QGridLayout, QWidget, QVBoxLayout, QFra
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PyQt6.QtCore import QUrl, Qt, QTimer, QRect
 
-from ui.utils.rounded_image import RoundedImage
-from ui.utils.hoverable_widget import HoverableWidget
-from ui.utils.scrolling_label import ScrollingLabel
+from src.ui.utils.rounded_image import RoundedImage
+from src.ui.utils.hoverable_widget import HoverableWidget
+from src.ui.utils.scrolling_label import ScrollingLabel
 
 class LibraryGrid(QScrollArea):
     def __init__(self, item_click_callback):

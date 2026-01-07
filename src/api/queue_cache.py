@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Optional, List, Dict
+from typing import Optional, List
 
 QUEUE_CACHE_FILE = 'cache/queue.json'
 

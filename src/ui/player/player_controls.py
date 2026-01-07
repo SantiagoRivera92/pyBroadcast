@@ -1,12 +1,13 @@
+from typing import Optional
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QLabel, QPushButton, QSlider, QSizePolicy
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtCore import Qt, QSize, pyqtSignal, QObject
 from PyQt6.QtGui import QPixmap, QImage, QIcon
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PyQt6.QtCore import QUrl
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtGui import QPainter
 
-from ui.utils.scrolling_label import ScrollingLabel
+from src.ui.utils.scrolling_label import ScrollingLabel
 
 class SvgButton(QPushButton):
     def __init__(self, svg_path, size=24, parent=None):
@@ -75,6 +76,10 @@ class SvgButton(QPushButton):
         super().leaveEvent(a0)
 
 class PlayerControls(QFrame):
+    
+    albumClicked = pyqtSignal(object)
+    artistClicked = pyqtSignal(object)
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(110)
@@ -98,11 +103,18 @@ class PlayerControls(QFrame):
         self.track_name.setText("No track playing")
         self.track_name.setStyleSheet("background: transparent; color: white; font-weight: bold; font-size: 15px; border: none; padding: 0;")
         self.track_name.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        self.album_name = ScrollingLabel(info_widget)
+        self.album_name.setText("")
+        self.album_name.setStyleSheet("background: transparent; color: #b3b3b3; font-size: 13px; border: none; padding: 0; text-decoration: underline; cursor: pointer;")
+        self.album_name.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        self.album_name.onClickCallback = self._on_album_clicked
         self.artist_name = ScrollingLabel(info_widget)
         self.artist_name.setText("")
-        self.artist_name.setStyleSheet("background: transparent; color: #b3b3b3; font-size: 13px; border: none; padding: 0;")
+        self.artist_name.setStyleSheet("background: transparent; color: #b3b3b3; font-size: 13px; border: none; padding: 0; text-decoration: underline; cursor: pointer;")
         self.artist_name.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        self.artist_name.onClickCallback = self._on_artist_clicked
         info_layout.addWidget(self.track_name)
+        info_layout.addWidget(self.album_name)
         info_layout.addWidget(self.artist_name)
         info_layout.addStretch()
         info_widget.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
@@ -244,9 +256,18 @@ class PlayerControls(QFrame):
             self.volume_icon.svg_path = "assets/volume_up.svg"
         self.volume_icon.update_icon()
     
-    def set_track_info(self, track_name, artist_name, artwork_url):
+    def set_track_info(self, track_name, album_name, artist_name, artwork_url, album_id: Optional[int], artist_id: Optional[int], is_albumartist: bool):
         self.track_name.setText(track_name)
+        self.album_name.setText(album_name)
         self.artist_name.setText(artist_name)
+        self.album_id = album_id
+        self.artist_id = artist_id
+        self.is_albumartist = is_albumartist
+        if is_albumartist:
+            self.artist_name.setStyleSheet("background: transparent; color: #b3b3b3; font-size: 13px; border: none; padding: 0; text-decoration: underline; cursor: pointer;")
+        else:
+            self.artist_name.setStyleSheet("background: transparent; color: #b3b3b3; font-size: 13px; border: none; padding: 0; text-decoration: none; cursor: default;")
+
         
         if artwork_url:
             request = QNetworkRequest(QUrl(artwork_url))
@@ -331,3 +352,10 @@ class PlayerControls(QFrame):
         self._info_widget.setMaximumWidth(info_width)
         volume_width = int(total_width * 0.20)
         self.volume_slider.setFixedWidth(max(60, volume_width))
+    
+    def _on_album_clicked(self):
+        self.albumClicked.emit(self.album_id)
+            
+    def _on_artist_clicked(self):
+        if self.is_albumartist:
+           self.artistClicked.emit(self.artist_id)

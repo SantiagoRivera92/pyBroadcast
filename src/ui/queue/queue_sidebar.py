@@ -1,14 +1,16 @@
 from PyQt6.QtWidgets import (QFrame, QVBoxLayout, QLabel, QListWidget, 
                              QListWidgetItem, QPushButton, QHBoxLayout, QWidget, QSizePolicy)
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
 
-from ui.utils.scrolling_label import ScrollingLabel
+from src.ui.utils.scrolling_label import ScrollingLabel
+from src.ui.utils.hoverable_widget import HoverableWidget
 
-class QueueItem(QWidget):
+class QueueItem(HoverableWidget):
     removeRequested = pyqtSignal(int)
+    itemClicked = pyqtSignal(int)
     
     def __init__(self, track_info, index, is_current=False):
-        super().__init__()
+        super().__init__(self.callback, index)
         self.index = index
         self.track_info = track_info
         self.is_current = is_current
@@ -16,11 +18,13 @@ class QueueItem(QWidget):
         # Set fixed height for uniformity
         self.setFixedHeight(64)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setMaximumWidth(350)  # Match QueueSidebar fixed width
-        
+        self.setMinimumWidth(314)
+        self.setMaximumWidth(314)  # Match QueueSidebar fixed width
+                
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 0, 16, 0)
+        layout.setContentsMargins(8, 0, 8, 0)
         layout.setSpacing(12)
+        layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         
         # Subtle indicator for current track
         if is_current:
@@ -32,10 +36,12 @@ class QueueItem(QWidget):
         # Text container
         text_container = QWidget(self)
         text_container.setStyleSheet("background: transparent;")
+        text_container.setMinimumWidth(240)
+        text_container.setMaximumWidth(240)
         text_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         text_layout = QVBoxLayout(text_container)
         text_layout.setContentsMargins(0, 0, 0, 0)
-        text_layout.setSpacing(4)
+        text_layout.setSpacing(2)
         
         # Title label with proper height
         title_label = ScrollingLabel(text_container)
@@ -114,6 +120,15 @@ class QueueItem(QWidget):
                 background-color: rgba(255, 255, 255, 0.08);
             }}
         """)
+        
+    def callback(self, index):
+        """Callback for when the item is clicked"""
+        self.itemClicked.emit(index)
+    
+    def sizeHint(self) -> QSize:
+        sizeHint = super().sizeHint()
+        sizeHint.setHeight(64)
+        return sizeHint
 
 class QueueSidebar(QFrame):
     playTrackRequested = pyqtSignal(int)
@@ -151,11 +166,12 @@ class QueueSidebar(QFrame):
             QPushButton {
                 background: none;
                 border: 1px solid #5DADE2;
-                color: #5DADE2;
+                color: #5DADE2;F
                 padding: 6px 12px;
                 border-radius: 4px;
                 font-size: 12px;
                 font-weight: bold;
+                margin-right: 10px;
             }
             QPushButton:hover {
                 background-color: #5DADE2;

@@ -25,11 +25,11 @@ class SidebarNavigation(QListWidget):
                 margin: 2px 0px;
             }
             QListWidget::item:hover {
-                background-color: #1a1a1a;
+                background-color: #313a4d;
                 color: #ffffff;
             }
             QListWidget::item:selected {
-                background-color: #1a1a1a;
+                background-color: #313a4d;
                 color: #4DA6FF;
             }
         """)

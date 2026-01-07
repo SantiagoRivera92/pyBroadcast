@@ -6,22 +6,23 @@ from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtCore import QUrl, QTimer, Qt
 from PyQt6.QtGui import QAction
 
-from api.ibroadcast.ibroadcast_api import iBroadcastAPI
-from api.queue_cache import QueueCache
-from api.lastfm.lastfm_api import LastFMAPI
+from src.api.ibroadcast.ibroadcast_api import iBroadcastAPI
+from src.api.queue_cache import QueueCache
+from src.api.lastfm.lastfm_api import LastFMAPI
 
-from ui.search.search_header import SearchHeader
-from ui.navigation.sidebar_navigation import SidebarNavigation
-from ui.grid.library_grid import LibraryGrid
-from ui.player.player_controls import PlayerControls
-from ui.artist.artist_header import ArtistHeader
-from ui.album.album_detail_view import AlbumDetailView
-from ui.playlist.playlist_detail_view import PlaylistDetailView
-from ui.queue.queue_sidebar import QueueSidebar
-from ui.utils.context_menus import TrackContextMenu
-from ui.utils.options_dialog import OptionsDialog
+from src.ui.search.search_header import SearchHeader
+from src.ui.navigation.sidebar_navigation import SidebarNavigation
+from src.ui.grid.library_grid import LibraryGrid
+from src.ui.player.player_controls import PlayerControls
+from src.ui.artist.artist_header import ArtistHeader
+from src.ui.album.album_detail_view import AlbumDetailView
+from src.ui.playlist.playlist_detail_view import PlaylistDetailView
+from src.ui.queue.queue_sidebar import QueueSidebar
+from src.ui.utils.context_menus import TrackContextMenu
+from src.ui.utils.options_dialog import OptionsDialog
 
 class iBroadcastNative(QMainWindow):
+    
     def __init__(self):
         super().__init__()
         self.api = iBroadcastAPI()
@@ -47,6 +48,7 @@ class iBroadcastNative(QMainWindow):
         self.cache_update_timer.timeout.connect(self.update_cache_position)
         self.cache_update_timer.start(1000)  # Update every second
         
+        self.init_navigation_stack()
         self.init_ui()
         
         self.timer = QTimer()
@@ -58,7 +60,55 @@ class iBroadcastNative(QMainWindow):
         self.media_player.playbackStateChanged.connect(self.on_playback_state_changed)  # NEW
         
         self.check_auth()
+    
+    def init_navigation_stack(self):
+        """Initialize the navigation stack and last search query."""
+        self.navigation_stack = []
+        self._last_search_query = None
 
+    def push_page(self, page):
+        """Push a page onto the navigation stack if it's not a duplicate of the current top."""
+        if self.navigation_stack:
+            top = self.navigation_stack[-1]
+            # For search, only push if query is different and not empty
+            if page['type'] == 'Search' and top['type'] == 'Search':
+                if page.get('query') == top.get('query'):
+                    return
+            # For other types, only push if type/id differ
+            elif page['type'] == top['type'] and page.get('id') == top.get('id'):
+                return
+        self.navigation_stack.append(page)
+
+    def pop_page(self):
+        """Pop the current page from the navigation stack and return the previous one, or None.
+        Never pop the root navigation element (first Navigation type in stack)."""
+        if len(self.navigation_stack) > 1:
+            # Find the first navigation element (root)
+            root_index = None
+            for i, page in enumerate(self.navigation_stack):
+                if page.get('type') == 'Navigation':
+                    root_index = i
+                    break
+            # Only pop if we're not at the root
+            if root_index is not None and len(self.navigation_stack) > root_index + 1:
+                self.navigation_stack.pop()
+                return self.navigation_stack[-1]
+        # Never pop the root navigation element
+        return self.navigation_stack[-1] if self.navigation_stack else None
+
+    def go_back(self):
+        """Navigate to the previous page in the stack, if any."""
+        prev = self.pop_page()
+        if prev:
+            if prev['type'] == 'Artist':
+                self.show_artist_albums(prev['id'])
+            elif prev['type'] == 'Album':
+                self.show_album_detail(prev['id'])
+            elif prev['type'] == 'Navigation':
+                self.switch_view(prev['id'])
+            elif prev['type'] == 'Search':
+                self.handle_search(prev['query'])
+                
     def init_ui(self):
         self.setWindowTitle("iBroadcast Native")
         self.resize(1400, 900)
@@ -72,9 +122,23 @@ class iBroadcastNative(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
+        # Add a horizontal layout for back button + search header
+        top_bar_layout = QHBoxLayout()
+        top_bar_layout.setContentsMargins(0, 0, 0, 0)
+        top_bar_layout.setSpacing(0)
+
+        from PyQt6.QtWidgets import QPushButton
+        self.back_btn = QPushButton("←")
+        self.back_btn.setFixedWidth(40)
+        self.back_btn.setToolTip("Back")
+        self.back_btn.clicked.connect(self.go_back)
+        top_bar_layout.addWidget(self.back_btn)
+
         self.search_header = SearchHeader()
         self.search_header.searchTextChanged.connect(self.handle_search)
-        main_layout.addWidget(self.search_header)
+        top_bar_layout.addWidget(self.search_header)
+
+        main_layout.addLayout(top_bar_layout)
 
         body_layout = QHBoxLayout()
         body_layout.setSpacing(0)
@@ -148,6 +212,8 @@ class iBroadcastNative(QMainWindow):
         self.controls.progress.sliderPressed.connect(self.on_seek_start)
         self.controls.progress.sliderReleased.connect(self.on_seek_end)
         self.controls.progress.valueChanged.connect(self.on_seek_progress)
+        self.controls.albumClicked.connect(self.show_album_detail)
+        self.controls.artistClicked.connect(self.show_artist_albums)
 
     def handle_search_result_click(self, item_id):
         # Try to find the item in artists, albums, or tracks
@@ -156,7 +222,7 @@ class iBroadcastNative(QMainWindow):
         elif item_id in self.api.library['albums']:
             self.show_album_detail(item_id)
         elif item_id in self.api.library['tracks']:
-            track = self.api.library['tracks'][item_id]
+            self.clear_queue()
             self.play_track_by_id(item_id)
 
     def create_menu_bar(self):
@@ -181,7 +247,7 @@ class iBroadcastNative(QMainWindow):
     
     def show_options(self):
         """Show the options dialog - NEW"""
-        dialog = OptionsDialog(self.lastfm, self)
+        dialog = OptionsDialog(self.lastfm, self.api, self)
         dialog.exec()
 
     def show_track_context_menu_album(self, pos):
@@ -229,16 +295,23 @@ class iBroadcastNative(QMainWindow):
     
 
     def handle_search(self, text):
-        if len(text) < 2:
-            if self.sidebar.currentRow() == 0:
-                self.load_artists()
-            self.content_stack.setCurrentWidget(self.artists_view)
+        if len(text) < 3:
+            # Pop the existing search page
+            if self.navigation_stack and self.navigation_stack[-1].get('type') == 'Search':
+                self.pop_page()
             return
+
+        query = text.lower()
+        # If the last page is a search, update its query; otherwise, push a new search page
+        if self.navigation_stack and self.navigation_stack[-1].get('type') == 'Search':
+            self.navigation_stack[-1]['query'] = query
+        else:
+            self.push_page({"type": "Search", "query": query})
+        self._last_search_query = query
 
         self.artist_header.setVisible(False)
 
         results = []
-        query = text.lower()
 
         for aid, artist in self.api.library['albumartists'].items():
             if query in str(artist.get('name', '')).lower():
@@ -261,6 +334,9 @@ class iBroadcastNative(QMainWindow):
         if self.api.access_token:
             res = self.api.load_library()
             if res.get('success'):
+                # Add 'Artists' as the root of the navigation stack
+                self.navigation_stack = []
+                self.push_page({"type": "Navigation", "id": 0})
                 self.load_artists()
                 self.restore_queue_from_cache()
         else:
@@ -292,7 +368,11 @@ class iBroadcastNative(QMainWindow):
             self.oauth_poll_timer.stop()
             self.controls.track_info.setText(f"Login failed: {status.get('message', 'Unknown error')}")
 
-    def switch_view(self, index):
+    def switch_view(self, index, push_to_stack=True):
+        if push_to_stack:
+            # User clicked a sidebar navigation link: reset stack to just this root
+            self.navigation_stack = []
+            self.push_page({"type": "Navigation", "id": index})
         self.content_stack.setCurrentIndex(index)
         self.current_album_id = None
         self._showing_artist_albums = False
@@ -335,8 +415,10 @@ class iBroadcastNative(QMainWindow):
                 subtitle += f" • {year}"
             self.albums_view.add_item(album.get('name'), subtitle, artwork, album.get('item_id'))
 
-    def show_album_detail(self, album_id):
+    def show_album_detail(self, album_id, push_to_stack=True):
         album_id = int(album_id)
+        if push_to_stack:
+            self.push_page({"type": "Album", "id": album_id})
         self.current_album_id = album_id
         self.current_playlist_id = None
         
@@ -396,6 +478,7 @@ class iBroadcastNative(QMainWindow):
         self.content_stack.setCurrentWidget(self.playlist_detail_view)
 
     def load_playlists(self):
+        self.artist_header.setVisible(False)
         self.content_stack.setCurrentWidget(self.playlists_view)
         self.playlists_view.clear()
         playlists = self.api.library.get('playlists', {})
@@ -414,7 +497,9 @@ class iBroadcastNative(QMainWindow):
                 pid
             )
 
-    def show_artist_albums(self, artist_id):
+    def show_artist_albums(self, artist_id, push_to_stack=True):
+        if push_to_stack:
+            self.push_page({"type": "Artist", "id": int(artist_id)})
         artist = None
         for a in self.api.library['albumartists'].values():
             if int(a.get('item_id')) == int(artist_id):
@@ -555,9 +640,21 @@ class iBroadcastNative(QMainWindow):
             
             track_name = track.get('title', 'Unknown Track')
             artist_name = artist.get('name', 'Unknown Artist') if artist else 'Unknown Artist'
+            album_name = album.get('name', '') if album else 'Unknown Album'
             artwork_url = self.api.get_artwork_url(track.get('artwork_id'))
             
-            self.controls.set_track_info(track_name, artist_name, artwork_url)
+            artist = self.api.library['artists'].get(int(track.get('artist_id')))
+            album = self.api.library['albums'].get(int(track.get('album_id')))
+            album_artist = self.api.library['albumartists'].get(int(artist.get('item_id'))) if artist else None
+            
+            album_id = 0
+            artist_id = 0
+            if artist:
+                artist_id = artist.get('item_id')
+            if album:
+                album_id = album.get('item_id')
+            
+            self.controls.set_track_info(track_name, album_name, artist_name, artwork_url, album_id, artist_id, album_artist is not None)
             self.controls.set_playing(True)
             
             # Update cache with new track
@@ -722,8 +819,11 @@ class iBroadcastNative(QMainWindow):
                     track_name = track.get('title', 'Unknown Track')
                     artist_name = artist.get('name', 'Unknown Artist') if artist else 'Unknown Artist'
                     artwork_url = self.api.get_artwork_url(track.get('artwork_id'))
+                    album = self.api.library['albums'].get(int(track.get('album_id')))
+                    album_name = album.get('name', 'Unknown Album') if album else 'Unknown Album'
+                    albumartist = self.api.library['albumartists'].get(int(artist.get('item_id'))) if artist else None
                     
-                    self.controls.set_track_info(track_name, artist_name, artwork_url)
+                    self.controls.set_track_info(track_name, album_name, artist_name, artwork_url, album.get('item_id') if album else None, artist.get('item_id') if artist else None, albumartist is not None)
                     
                     # Load the media but don't play
                     url = self.api.get_stream_url(self.current_track_id)

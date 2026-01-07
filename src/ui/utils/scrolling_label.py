@@ -1,8 +1,11 @@
 from PyQt6.QtWidgets import QLabel
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QTimer, pyqtSignal, Qt
 from PyQt6.QtGui import QPainter, QFontMetrics
 
 class ScrollingLabel(QLabel):
+    
+    onClickCallback = None
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.full_text = ""
@@ -16,7 +19,14 @@ class ScrollingLabel(QLabel):
         self.is_scrolling = False
         self.needs_scroll = False
         self.gap = 50
-        
+    
+    def setOnClickCallback(self, callback):
+        self.onClickCallback = callback
+        if callback:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+        else:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+    
     def setGap(self, gap):
         self.gap = gap
         
@@ -91,3 +101,9 @@ class ScrollingLabel(QLabel):
         if self.full_text:
             self.stop_scrolling()
             self.check_if_needs_scroll()
+    
+    def mouseReleaseEvent(self, ev):
+        if ev and ev.button() == Qt.MouseButton.LeftButton:
+            if self.onClickCallback:
+                self.onClickCallback()
+        super().mouseReleaseEvent(ev)

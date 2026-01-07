@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import QWidget, QVBoxLayout
 from PyQt6.QtCore import pyqtSignal
-from ui.album.album_header import AlbumHeader
-from ui.album.album_track_list import AlbumTrackList
+from src.ui.album.album_header import AlbumHeader
+from src.ui.album.album_track_list import AlbumTrackList
 
 class AlbumDetailView(QWidget):
     playTrackRequested = pyqtSignal(object)

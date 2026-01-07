@@ -4,7 +4,7 @@ from PyQt6.QtGui import QPixmap, QImage
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PyQt6.QtCore import QUrl
 
-from ui.utils.scrolling_label import ScrollingLabel
+from src.ui.utils.scrolling_label import ScrollingLabel
 
 class PlaylistHeader(QFrame):
     upButtonClicked = pyqtSignal()
