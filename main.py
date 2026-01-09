@@ -8,6 +8,7 @@ from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtCore import QUrl, QTimer, Qt
 from PyQt6.QtGui import QAction, QIcon,QFontDatabase, QFont
 
+from src.api.ibroadcast.models import Artist, Album, Track, Playlist
 from src.api.ibroadcast.ibroadcast_api import iBroadcastAPI
 from src.api.queue_cache import QueueCache
 from src.api.lastfm.lastfm_api import LastFMAPI
@@ -173,16 +174,16 @@ class iBroadcastNative(QMainWindow):
         content_layout.addWidget(self.artist_header)
         
         self.content_stack = QStackedWidget()
-        self.artists_view = LibraryGrid(self.show_artist_albums)
-        self.albums_view = LibraryGrid(self.show_album_detail)
-        self.playlists_view = LibraryGrid(self.show_playlist_detail)
+        self.artists_view = LibraryGrid(self.show_artist_albums, self.api)
+        self.albums_view = LibraryGrid(self.show_album_detail, self.api)
+        self.playlists_view = LibraryGrid(self.show_playlist_detail, self.api)
+        self.search_results_view = LibraryGrid(self.handle_search_result_click, self.api)
         self.album_detail_view = AlbumDetailView()
         self.album_detail_view.playTrackRequested.connect(self.play_track_from_album)
         self.album_detail_view.upButtonClicked.connect(self.show_artist_albums)
         self.playlist_detail_view = PlaylistDetailView()
         self.playlist_detail_view.playTrackRequested.connect(self.play_track_from_playlist)
-        self.playlist_detail_view.upButtonClicked.connect(self.load_playlists)
-        self.search_results_view = LibraryGrid(self.handle_search_result_click)
+        self.playlist_detail_view.upButtonClicked.connect(self.load_playlists)   
 
         self.content_stack.addWidget(self.artists_view)
         self.content_stack.addWidget(self.albums_view)
@@ -231,13 +232,15 @@ class iBroadcastNative(QMainWindow):
 
     def handle_search_result_click(self, item_id):
         # Try to find the item in artists, albums, or tracks
-        if item_id in self.api.library['artists']:
+        if isinstance(item_id, Artist):
             self.show_artist_albums(item_id)
-        elif item_id in self.api.library['albums']:
+        elif isinstance(item_id, Album):
             self.show_album_detail(item_id)
-        elif item_id in self.api.library['tracks']:
+        elif isinstance(item_id, Track):
             self.clear_queue()
             self.play_track_by_id(item_id)
+        elif isinstance(item_id, Playlist):
+            self.show_playlist_detail(item_id)
 
     def create_menu_bar(self):
         """Create the menu bar - NEW"""
@@ -300,11 +303,9 @@ class iBroadcastNative(QMainWindow):
         if not hasattr(self, '_current_playlist_tracks') or row >= len(self._current_playlist_tracks):
             return
         track_id = self._current_playlist_tracks[row]
-        track = self.api.library['tracks'].get(int(track_id))
-        if track:
-            album_id = track.get('album_id')
-            if album_id:
-                self.show_album_detail(album_id)
+        album = self.api.get_album_by_track(int(track_id))
+        if album:
+            self.show_album_detail(album.id)
     
     
 
@@ -325,31 +326,30 @@ class iBroadcastNative(QMainWindow):
 
         self.artist_header.setVisible(False)
 
-        results = []
-
-        for aid, artist in self.api.library['albumartists'].items():
-            if query in str(artist.get('name', '')).lower():
-                results.append((artist.get('name'), "Artist", self.api.get_artwork_url(artist.get('artwork_id')), aid))
-
-        for aid, album in self.api.library['albums'].items():
-            if query in str(album.get('name', '')).lower():
-                artist_id = album.get('artist_id')
-                artist = self.api.library['artists'].get(int(artist_id)) if artist_id else None
-                artist_name = "Album by " + artist.get('name') if artist else "Album"
-                results.append((album.get('name'), artist_name, self.api.get_artwork_url(album.get('artwork_id')), aid))
-
-        for tid, track in self.api.library['tracks'].items():
-            if query in str(track.get('title', '')).lower():
-                artist = self.api.library['artists'].get(int(track.get('artist_id'))) if track.get('artist_id') else None
-                artist_name = "Track by " + artist.get('name') if artist else "Track"
-                results.append((track.get('title'), artist_name, self.api.get_artwork_url(track.get('artwork_id')), tid))
+        results = self.api.search(text)
 
         self.search_results_view.clear()
-        for title, subtitle, image_url, item_id in results:
-            self.search_results_view.add_item(title, subtitle, image_url, item_id)
+        for result in results:
+            artwork_id = 0
+            if isinstance(result, Artist):
+                artwork_id = result.artwork_id
+            elif isinstance(result, Album):
+                tracks = self.api.get_tracks_by_album(result.id)
+                for track in tracks:
+                    if track.artwork_id != 0:
+                        artwork_id = track.artwork_id
+                        break
+            elif isinstance(result, Track):
+                artwork_id = result.artwork_id
+            elif isinstance(result, Playlist):
+                artwork_id = result.artwork_id
+            else:
+                continue
+            self.search_results_view.add_item(result, self.api.get_artwork_url(artwork_id))
         self.content_stack.setCurrentWidget(self.search_results_view)
 
     def check_auth(self):
+        """Check if user is authenticated; if not, start OAuth flow."""
         if self.api.access_token:
             res = self.api.load_library()
             if res.get('success'):
@@ -409,136 +409,123 @@ class iBroadcastNative(QMainWindow):
         self._showing_artist_albums=False
         self.artist_header.setVisible(self._showing_artist_albums)
         self.artists_view.clear()
-        artists = sorted(self.api.library['albumartists'].values(), key=lambda x: str(x.get('name', '')).lower())
+        artists = self.api.get_artists_with_albums()
         for artist in artists:
-            artwork = self.api.get_artwork_url(artist.get('artwork_id'))
-            self.artists_view.add_item(artist.get('name', 'Unknown'), "Artist", artwork, artist.get('item_id'))
-    
-    def album_sort_key(self, x):
-        artist = self.api.library['artists'].get(int(x.get('artist_id')))
-        artist_name = artist.get('name', '').lower() if artist else ''
-        year = x.get('year') or 0
-        return (artist_name, year)
+            self.artists_view.add_item(artist, self.api.get_artwork_url(artist.artwork_id))
     
     def load_albums(self, artist_id=None):
         self.content_stack.setCurrentWidget(self.albums_view)
         self.artist_header.setVisible(self._showing_artist_albums)
         self.albums_view.clear()
-        albums = self.api.library['albums'].values()
+        albums = None
         if artist_id:
-            albums = [a for a in albums if int(a.get('artist_id')) == int(artist_id)]
-        albums_list = list(albums)
-        albums_list.sort(key=self.album_sort_key)
-        for album in albums_list:
-            artwork = self.api.get_artwork_url(album.get('artwork_id'))
-            artist = self.api.library['artists'].get(int(album.get('artist_id')))
-            artist_name = artist.get('name', 'Unknown Artist') if artist else 'Unknown Artist'
-            year = album.get('year', 0)
-            subtitle = f"{artist_name}"
-            self.albums_view.add_item(album.get('name'), subtitle, artwork, album.get('item_id'), year if year and year > 0 else None)
-
+            albums = self.api.get_artist_albums(artist_id)
+        else:
+            albums = self.api.get_albums()
+        for album in albums:
+            artwork_id = None
+            tracks = self.api.get_tracks_by_album(album.id)
+            for track in tracks:
+                if track.artwork_id != 0:
+                    artwork_id = track.artwork_id
+                    break
+            self.albums_view.add_item(album, self.api.get_artwork_url(artwork_id))
+            
     def show_album_detail(self, album_id, push_to_stack=True):
-        album_id = int(album_id)
+        if isinstance(album_id, int):
+            album = self.api.get_album_by_id(album_id)
+        elif isinstance(album_id, Album):
+            album = album_id
+            album_id = album.id
+        else:
+            return
+        
         if push_to_stack:
             self.push_page({"type": "Album", "id": album_id})
         self.current_album_id = album_id
         self.current_playlist_id = None
         
-        album = self.api.library['albums'].get(int(album_id)) or self.api.library['albums'].get(album_id)
         if not album:
             return
+        artists = self.api.get_artists_by_album(album_id)
+        artist_name = ",".join([a.name for a in artists]) if artists else "Unknown Artist"
+        year = album.year
+        tracks = self.api.get_tracks_by_album(album_id)
+        artwork_url = None
+        for track in tracks:
+            if track.artwork_id != 0:
+                artwork_url = self.api.get_artwork_url(track.artwork_id)
+                break
         
-        artist = self.api.library['artists'].get(int(album.get('artist_id')))
-        artist_name = artist.get('name', 'Unknown Artist') if artist else 'Unknown Artist'
-        year = album.get('year', '') or album.get('release_date', '')
-        artwork_url = self.api.get_artwork_url(album.get('artwork_id'))
+        self.album_detail_view.set_artist_id(artists[0].id if artists else None)
+        self.album_detail_view.set_album(album.name, artist_name, year, artwork_url)
         
-        self.album_detail_view.set_artist_id(int(album.get('artist_id')))
-        self.album_detail_view.set_album(album.get('name', 'Unknown Album'), artist_name, year, artwork_url)
-        
-        tracks = [t for t in self.api.library['tracks'].values() if int(t.get('album_id')) == int(album.get('item_id'))]
-        tracks.sort(key=lambda x: x.get('track', 0))
+        tracks.sort(key=lambda x: x.track_number if x.track_number is not None else 0)
         self.album_detail_view.set_tracks(tracks)
         
-        self._current_album_tracks = [t.get('item_id') for t in tracks]
+        self._current_album_tracks = [t.id for t in tracks]
         self.content_stack.setCurrentWidget(self.album_detail_view)
         self._showing_artist_albums=False
         self.artist_header.setVisible(self._showing_artist_albums)
         self.artist_header.upButtonClicked.connect(self.load_artists)
     
     def show_playlist_detail(self, playlist_id):
+        if isinstance(playlist_id, int):
+            playlist = self.api.get_playlist_by_id(playlist_id)
+        elif isinstance(playlist_id, Playlist):
+            playlist = playlist_id
+            playlist_id = playlist.id
+        else:
+            return
         self.current_playlist_id = playlist_id
         self.current_album_id = None
-        
-        playlist = self.api.library['playlists'].get(int(playlist_id)) or self.api.library['playlists'].get(playlist_id)
+                
         if not playlist:
             return
         
-        track_ids = playlist.get('tracks', [])
-        
-        artwork_url = ""
-        if track_ids:
-            first_track = self.api.library['tracks'].get(int(track_ids[0]))
-            if first_track and first_track.get('artwork_id'):
-                artwork_url = self.api.get_artwork_url(first_track['artwork_id'])
+        tracks = self.api.get_playlist_tracks(playlist_id)
         
         self.playlist_detail_view.set_playlist(
-            playlist.get('name', 'Untitled Playlist'),
-            len(track_ids),
-            artwork_url
+            playlist.name,
+            len(tracks),
+            self.api.get_artwork_url(playlist.artwork_id)
         )
-        
-        tracks = []
-        for track_id in track_ids:
-            track = self.api.library['tracks'].get(int(track_id))
-            if track:
-                tracks.append(track)
         
         self.playlist_detail_view.set_tracks(tracks)
         
-        self._current_playlist_tracks = track_ids
+        self._current_playlist_tracks = [t.id for t in tracks]
         self.content_stack.setCurrentWidget(self.playlist_detail_view)
 
     def load_playlists(self):
+        
         self.artist_header.setVisible(False)
         self.content_stack.setCurrentWidget(self.playlists_view)
         self.playlists_view.clear()
-        playlists = self.api.library.get('playlists', {})
-        for pid, pl in playlists.items():
-            artwork_url = ""
-            tracks = pl.get('tracks', [])
-            if tracks:
-                first_track_id = tracks[0]
-                first_track = self.api.library['tracks'].get(int(first_track_id))
-                if first_track and first_track.get('artwork_id'):
-                    artwork_url = self.api.get_artwork_url(first_track['artwork_id'])
-            self.playlists_view.add_item(
-                pl.get('name', 'Untitled Playlist'), 
-                f"{len(tracks)} tracks", 
-                artwork_url, 
-                pid
-            )
+        playlists = self.api.get_playlists()
+        
+        for playlist in playlists:
+            self.playlists_view.add_item(playlist, self.api.get_artwork_url(playlist.artwork_id))
 
     def show_artist_albums(self, artist_id, push_to_stack=True):
+        if isinstance(artist_id, int):
+            artist = self.api.get_artist_by_id(artist_id)
+        elif isinstance(artist_id, Artist):
+            artist = artist_id
+            artist_id = artist.id
+        else:
+            return
+            
         if push_to_stack:
             self.push_page({"type": "Artist", "id": int(artist_id)})
-        artist = None
-        for a in self.api.library['albumartists'].values():
-            if int(a.get('item_id')) == int(artist_id):
-                artist = a
-                break
-
+        
         if artist:
-            self.artist_header.set_artist(
-                artist.get('name', 'Unknown Artist'),
-                self.api.get_artwork_url(artist.get('artwork_id'))
-            )
+            self.artist_header.set_artist(artist.name, self.api.get_artwork_url(artist.artwork_id))
             self._showing_artist_albums = True
             self.content_stack.setCurrentWidget(self.albums_view)
+            self.load_albums(artist_id)
         else:
             self._showing_artist_albums = False
 
-        self.load_albums(artist_id)
 
     def play_track_from_album(self, track_id):
         if not hasattr(self, '_current_album_tracks'):
@@ -628,22 +615,11 @@ class iBroadcastNative(QMainWindow):
         self.update_queue_display()
 
     def play_track_by_id(self, track_id):
-        track = None
-        artist = None
-        album = None
-        for tr in self.api.library['tracks'].values():
-            if int(tr.get('item_id')) == int(track_id):
-                track = tr
-                break
-        if track:
-            for ar in self.api.library['artists'].values():
-                if int(ar.get('item_id')) == int(track.get('artist_id')):
-                    artist = ar
-                    break
-            for al in self.api.library['albums'].values():
-                if int(al.get('item_id')) == int(track.get('album_id')):
-                    album = al
-                    break
+        track = self.api.get_track_by_id(track_id)
+        artists = self.api.get_artists_by_track(track_id)
+        album = self.api.get_album_by_track(track_id)
+        
+        album_artists = self.api.get_artists_with_albums()
 
         if track:
             url = self.api.get_stream_url(track_id)
@@ -654,29 +630,15 @@ class iBroadcastNative(QMainWindow):
                         
             # Store track info for Last.fm scrobbling
             self.current_track_info = {
-                'artist': artist.get('name', 'Unknown Artist') if artist else 'Unknown Artist',
-                'track': track.get('title', 'Unknown Track'),
-                'album': album.get('name') if album else None
+                'artist': artists[0].name if artists else 'Unknown Artist',
+                'track': track.name if track else 'Unknown Track',
+                'album': album.name if album else None
             }
-            self.track_duration = track.get('length', 0)  # Duration in seconds
+            self.track_duration = track.length if track else 0  # Duration in seconds
             
-            track_name = track.get('title', 'Unknown Track')
-            artist_name = artist.get('name', 'Unknown Artist') if artist else 'Unknown Artist'
-            album_name = album.get('name', '') if album else 'Unknown Album'
-            artwork_url = self.api.get_artwork_url(track.get('artwork_id'))
+            artwork_url = self.api.get_artwork_url(track.artwork_id if track else None)
             
-            artist = self.api.library['artists'].get(int(track.get('artist_id')))
-            album = self.api.library['albums'].get(int(track.get('album_id')))
-            album_artist = self.api.library['albumartists'].get(int(artist.get('item_id'))) if artist else None
-            
-            album_id = 0
-            artist_id = 0
-            if artist:
-                artist_id = artist.get('item_id')
-            if album:
-                album_id = album.get('item_id')
-            
-            self.controls.set_track_info(track_name, album_name, artist_name, artwork_url, album_id, artist_id, album_artist is not None)
+            self.controls.set_track_info(track, album, artists, album_artists, artwork_url)
             self.controls.set_playing(True)
             
             # Update cache with new track
@@ -835,18 +797,15 @@ class iBroadcastNative(QMainWindow):
                         
             # Optionally restore the current track (paused)
             if self.current_track_id:
-                track = self.api.library['tracks'].get(int(self.current_track_id))
+                track = self.api.get_track_by_id(self.current_track_id)
                 if track:
-                    artist = self.api.library['artists'].get(int(track.get('artist_id')))
-                    track_name = track.get('title', 'Unknown Track')
-                    artist_name = artist.get('name', 'Unknown Artist') if artist else 'Unknown Artist'
-                    artwork_url = self.api.get_artwork_url(track.get('artwork_id'))
-                    album = self.api.library['albums'].get(int(track.get('album_id')))
-                    album_name = album.get('name', 'Unknown Album') if album else 'Unknown Album'
-                    albumartist = self.api.library['albumartists'].get(int(artist.get('item_id'))) if artist else None
+                    artists = self.api.get_artists_by_track(self.current_track_id)
+                    artwork_url = self.api.get_artwork_url(track.artwork_id)
+                    album = self.api.get_album_by_track(self.current_track_id)
+                    album_artists = self.api.get_artists_with_albums()
                     
-                    self.controls.set_track_info(track_name, album_name, artist_name, artwork_url, album.get('item_id') if album else None, artist.get('item_id') if artist else None, albumartist is not None)
-                    
+                    self.controls.set_track_info(track, album, artists, album_artists, artwork_url)    
+                                    
                     # Load the media but don't play
                     url = self.api.get_stream_url(self.current_track_id)
                     self.media_player.setSource(QUrl(url))
@@ -905,24 +864,26 @@ class iBroadcastNative(QMainWindow):
         
         # First, add the currently playing track
         if self.current_track_id:
-            track = self.api.library['tracks'].get(int(self.current_track_id)) or self.api.library['tracks'].get(int(self.current_track_id))
+            track = self.api.get_track_by_id(self.current_track_id)
             if track:
-                artist = self.api.library['artists'].get(int(track.get('artist_id')))
+                artists = self.api.get_artists_by_track(int(self.current_track_id))
+                artist_name = ",".join([a.name for a in artists]) if artists else "Unknown Artist"
                 tracks_data.append({
-                    'title': track.get('title', 'Unknown'),
-                    'artist': artist.get('name', 'Unknown Artist') if artist else 'Unknown Artist',
+                    'title': track.name,
+                    'artist': artist_name,
                     'track_id': self.current_track_id,
                     'is_current': True
                 })
         
         # Then add upcoming tracks from the queue
         for track_id in self.current_queue:
-            track = self.api.library['tracks'].get(int(track_id))
+            track = self.api.get_track_by_id(track_id)
             if track:
-                artist = self.api.library['artists'].get(int(track.get('artist_id')))
+                artists = self.api.get_artists_by_track(int(track_id))
+                artist_name = ",".join([a.name for a in artists]) if artists else "Unknown Artist"
                 tracks_data.append({
-                    'title': track.get('title', 'Unknown'),
-                    'artist': artist.get('name', 'Unknown Artist') if artist else 'Unknown Artist',
+                    'title': track.name,
+                    'artist': artist_name,
                     'track_id': track_id,
                     'is_current': False
                 })

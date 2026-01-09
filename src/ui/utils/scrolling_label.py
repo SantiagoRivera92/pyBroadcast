@@ -1,6 +1,8 @@
-from PyQt6.QtWidgets import QLabel
+from PyQt6.QtWidgets import QLabel, QBoxLayout
 from PyQt6.QtCore import QTimer, pyqtSignal, Qt
 from PyQt6.QtGui import QPainter, QFontMetrics
+
+from typing import Optional
 
 class ScrollingLabel(QLabel):
     
@@ -20,6 +22,7 @@ class ScrollingLabel(QLabel):
         self.is_scrolling = False
         self.needs_scroll = False
         self.gap = 50
+        self.artist_layout: Optional[QBoxLayout] = None
     
     def setOnClickCallback(self, callback):
         self.onClickCallback = callback

@@ -1,9 +1,10 @@
 from PyQt6.QtWidgets import QFrame, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView
 from PyQt6.QtCore import Qt, pyqtSignal
 
+from src.api.ibroadcast.models import Track
+
 class AlbumTrackList(QFrame):
     playTrackRequested = pyqtSignal(object)
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setStyleSheet("background-color: #181818; border: none;")
@@ -62,19 +63,19 @@ class AlbumTrackList(QFrame):
         layout.addWidget(self.table)
         
         # Store track data for retrieval
-        self.tracks_data = []
+        self.tracks_data : list[Track] = []
 
     def set_tracks(self, tracks):
         self.tracks_data = tracks
         self.table.setRowCount(len(tracks))
         
         for i, track in enumerate(tracks):
-            num_item = QTableWidgetItem(str(track.get('track', i+1)))
+            num_item = QTableWidgetItem(str(track.track_number))
             num_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             
-            title_item = QTableWidgetItem(track.get('title', 'Unknown'))
+            title_item = QTableWidgetItem(track.name)
             
-            duration_item = QTableWidgetItem(self.format_duration(track.get('length', 0)))
+            duration_item = QTableWidgetItem(self.format_duration(track.length))
             duration_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             
             self.table.setItem(i, 0, num_item)
@@ -87,6 +88,6 @@ class AlbumTrackList(QFrame):
 
     def on_row_double_clicked(self, row, column):
         if 0 <= row < len(self.tracks_data):
-            track_id = self.tracks_data[row].get('item_id')
+            track_id = self.tracks_data[row].id
             if track_id:
                 self.playTrackRequested.emit(track_id)

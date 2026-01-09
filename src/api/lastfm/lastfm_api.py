@@ -2,19 +2,19 @@ import hashlib
 import json
 import time
 import requests
-import os
 from pathlib import Path
-from dotenv import load_dotenv
-
-load_dotenv()
+from src.core.credentials_manager import CredentialsManager
 
 class LastFMAPI:
     """Handle Last.fm authentication and scrobbling"""
     
-    API_KEY = os.getenv("LASTFM_API_KEY")
-    API_SECRET = os.getenv("LASTFM_API_SECRET")
-    if not API_KEY or not API_SECRET:
-        raise ValueError("Last.fm API_KEY and API_SECRET must be set in environment variables.")
+    @property
+    def API_KEY(self):
+        return CredentialsManager.get_credential(CredentialsManager.LASTFM_API_KEY)
+
+    @property
+    def API_SECRET(self):
+        return CredentialsManager.get_credential(CredentialsManager.LASTFM_API_SECRET)
     API_URL = "http://ws.audioscrobbler.com/2.0/"
     
     def __init__(self):
@@ -68,6 +68,8 @@ class LastFMAPI:
         return hashlib.md5(sig_string.encode('utf-8')).hexdigest()
     
     def authenticate(self, username, password):
+        if not self.API_KEY or not self.API_SECRET:
+            return {'success': False, 'message': 'API key or secret not set'}
         """Authenticate with Last.fm using username and password"""
         # Build params for signature (without format)
         sig_params = {
@@ -104,6 +106,10 @@ class LastFMAPI:
     
     def scrobble(self, artist, track, album=None, timestamp=None):
         """Scrobble a track to Last.fm"""
+        
+        if not self.API_KEY or not self.API_SECRET:
+            return {'success': False, 'message': 'API key or secret not set'}
+        
         if not self.session_key:
             return {'success': False, 'message': 'Not authenticated'}
         
@@ -147,6 +153,9 @@ class LastFMAPI:
     
     def update_now_playing(self, artist, track, album=None):
         """Update Now Playing status on Last.fm"""
+        if not self.API_KEY or not self.API_SECRET:
+            return {'success': False, 'message': 'API key or secret not set'}
+        
         if not self.session_key:
             return {'success': False, 'message': 'Not authenticated'}
         
