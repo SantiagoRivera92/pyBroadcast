@@ -1,25 +1,24 @@
 from typing import Optional
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QLabel, QPushButton, QSlider, QSizePolicy
-from PyQt6.QtCore import Qt, QSize, pyqtSignal, QObject
+from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, pyqtSignal
 from PyQt6.QtGui import QPixmap, QImage, QIcon
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest
-from PyQt6.QtCore import QUrl
-from PyQt6.QtSvg import QSvgRenderer
-from PyQt6.QtGui import QPainter
+from PyQt6.QtCore import QUrl, QTimer
 
 from src.ui.utils.scrolling_label import ScrollingLabel
+from src.core.resource_path import resource_path
+
+
+from PyQt6.QtSvg import QSvgRenderer
+from PyQt6.QtGui import QPixmap, QIcon, QPainter
 
 class SvgButton(QPushButton):
     def __init__(self, svg_path, size=24, parent=None):
         super().__init__(parent)
         self.svg_path = svg_path
-        self.icon_size = size
-        self.default_color = "#b3b3b3"
-        self.hover_color = "#ffffff"
-        self.active_color = "#4DA6FF"  # Updated active color to brighter blue
-        self.current_color = self.default_color
-        self.is_active = False
-        
+        self.base_icon_size = size
+        self._icon_size = size
+        self.target_icon_size = size
         self.setFixedSize(size + 16, size + 16)
         self.setStyleSheet("""
             QPushButton {
@@ -28,53 +27,71 @@ class SvgButton(QPushButton):
                 padding: 8px;
             }
         """)
+        self._animation_timer = QTimer(self)
+        self._animation_timer.setInterval(16)  # ~60 FPS
+        self._animation_timer.timeout.connect(self._animate_icon_size)
+        self._animation_duration = 500  # ms
+        self._animation_elapsed = 0
+        self._animation_start_size = size
         self.update_icon()
-    
-    def set_active(self, active):
-        self.is_active = active
-        self.update_icon()
-    
-    def update_icon(self):
-        color = self.active_color if self.is_active else self.current_color
-        icon = self.create_colored_icon(self.svg_path, color, self.icon_size)
-        self.setIcon(icon)
-        self.setIconSize(QSize(self.icon_size, self.icon_size))
-    
-    def create_colored_icon(self, svg_path, color, size):
-        """Create a colored icon from SVG file"""
-        # Read SVG file
-        with open(svg_path, 'r') as f:
-            svg_data = f.read()
-        
-        # Replace fill color
-        svg_data = svg_data.replace('currentColor', color)
-        svg_data = svg_data.replace('fill="black"', f'fill="{color}"')
-        svg_data = svg_data.replace('fill="#000"', f'fill="{color}"')
-        svg_data = svg_data.replace('fill="#000000"', f'fill="{color}"')
-        svg_data = svg_data.replace('stroke="black"', f'stroke="{color}"')
-        svg_data = svg_data.replace('stroke="#000"', f'stroke="{color}"')
-        svg_data = svg_data.replace('stroke="#000000"', f'stroke="{color}"')
-        
-        # Render SVG to pixmap
-        renderer = QSvgRenderer(svg_data.encode())
-        pixmap = QPixmap(size, size)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        renderer.render(painter)
-        painter.end()
-        
-        return QIcon(pixmap)
-    
+
     def enterEvent(self, event):
-        self.current_color = self.hover_color
-        self.update_icon()
+        self._start_icon_size_animation(int(self.base_icon_size * 1.2))
         super().enterEvent(event)
-    
+
     def leaveEvent(self, a0):
-        self.current_color = self.default_color
-        self.update_icon()
+        self._start_icon_size_animation(self.base_icon_size)
         super().leaveEvent(a0)
 
+    def _start_icon_size_animation(self, target_size):
+        self.target_icon_size = target_size
+        self._animation_start_size = self._icon_size
+        self._animation_elapsed = 0
+        self._animation_timer.start()
+
+    def _animate_icon_size(self):
+        self._animation_elapsed += self._animation_timer.interval()
+        progress = min(self._animation_elapsed / self._animation_duration, 1.0)
+        new_size = int(self._animation_start_size + (self.target_icon_size - self._animation_start_size) * progress)
+        if new_size != self._icon_size:
+            self._icon_size = new_size
+            self.update_icon()
+        if progress >= 1.0:
+            self._animation_timer.stop()
+
+    @property
+    def icon_size(self):
+        return self._icon_size
+
+    @icon_size.setter
+    def icon_size(self, value):
+        self._icon_size = int(value)
+        self.update_icon()
+
+    def update_icon(self):
+        try:
+            with open(self.svg_path, "r") as f:
+                svg_data = f.read()
+            renderer = QSvgRenderer(bytearray(svg_data, encoding='utf-8'))
+            pixmap = QPixmap(self._icon_size, self._icon_size)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pixmap)
+            renderer.render(painter)
+            painter.end()
+            self.setIcon(QIcon(pixmap))
+            self.setIconSize(QSize(self._icon_size, self._icon_size))
+        except Exception as e:
+            self.setIcon(QIcon())  # Clear icon if error
+
+    @property
+    def svg_path(self):
+        return self._svg_path
+
+    @svg_path.setter
+    def svg_path(self, value):
+        self._svg_path = value
+        self.update_icon()
+        
 class PlayerControls(QFrame):
     
     albumClicked = pyqtSignal(object)
@@ -130,11 +147,11 @@ class PlayerControls(QFrame):
         btns_layout = QHBoxLayout()
         btns_layout.setSpacing(15)
         
-        self.shuffle_btn = SvgButton("assets/shuffle_off.svg", 20)
-        self.prev_btn = SvgButton("assets/fr.svg", 24)
-        self.play_btn = SvgButton("assets/play.svg", 20)
-        self.next_btn = SvgButton("assets/ff.svg", 24)
-        self.repeat_btn = SvgButton("assets/repeat_off.svg", 20)
+        self.shuffle_btn = SvgButton(resource_path("assets/shuffle_off.svg"), 20)
+        self.prev_btn = SvgButton(resource_path("assets/fr.svg"), 24)
+        self.play_btn = SvgButton(resource_path("assets/play.svg"), 20)
+        self.next_btn = SvgButton(resource_path("assets/ff.svg"), 24)
+        self.repeat_btn = SvgButton(resource_path("assets/repeat_off.svg"), 20)
         
         # Special styling for play button
         self.play_btn.setFixedSize(40, 40)
@@ -145,13 +162,9 @@ class PlayerControls(QFrame):
                 border-radius: 20px;
             }
             QPushButton:hover {
-                background-color: #f0f0f0;
+                background-color: #a6a6d6;
             }
         """)
-        self.play_btn.default_color = "#000000"
-        self.play_btn.hover_color = "#000000"
-        self.play_btn.active_color = "#000000"
-        self.play_btn.update_icon()
         
         btns_layout.addStretch()
         btns_layout.addWidget(self.shuffle_btn)
@@ -202,7 +215,7 @@ class PlayerControls(QFrame):
         volume_layout = QHBoxLayout()
         volume_layout.setSpacing(10)
         
-        self.volume_icon = SvgButton("assets/volume_up.svg", 20)
+        self.volume_icon = SvgButton(resource_path("assets/volume_up.svg"), 20)
         self.volume_icon.setEnabled(False)  # Make it non-clickable
         
         self.volume_slider = QSlider(Qt.Orientation.Horizontal)
@@ -251,10 +264,9 @@ class PlayerControls(QFrame):
     def update_volume_icon(self, value):
         """Update volume icon based on volume level"""
         if value == 0:
-            self.volume_icon.svg_path = "assets/volume_down.svg"
+            self.volume_icon.svg_path = resource_path("assets/volume_down.svg")
         else:
-            self.volume_icon.svg_path = "assets/volume_up.svg"
-        self.volume_icon.update_icon()
+            self.volume_icon.svg_path = resource_path("assets/volume_up.svg")
     
     def set_track_info(self, track_name, album_name, artist_name, artwork_url, album_id: Optional[int], artist_id: Optional[int], is_albumartist: bool):
         self.track_name.setText(track_name)
@@ -294,30 +306,25 @@ class PlayerControls(QFrame):
     def set_playing(self, is_playing):
         self.is_playing = is_playing
         if is_playing:
-            self.play_btn.svg_path = "assets/pause.svg"
+            self.play_btn.svg_path = resource_path("assets/pause.svg")
         else:
-            self.play_btn.svg_path = "assets/play.svg"
-        self.play_btn.update_icon()
+            self.play_btn.svg_path = resource_path("assets/play.svg")
     
     def set_shuffle(self, enabled):
         self.shuffle_enabled = enabled
         if enabled:
-            self.shuffle_btn.svg_path = "assets/shuffle_on.svg"
+            self.shuffle_btn.svg_path = resource_path("assets/shuffle_on.svg")
         else:
-            self.shuffle_btn.svg_path = "assets/shuffle_off.svg"
-        self.shuffle_btn.set_active(enabled)
+            self.shuffle_btn.svg_path = resource_path("assets/shuffle_off.svg")
     
     def set_repeat(self, mode):
         self.repeat_mode = mode
         if mode == "off":
-            self.repeat_btn.svg_path = "assets/repeat_off.svg"
-            self.repeat_btn.set_active(False)
+            self.repeat_btn.svg_path = resource_path("assets/repeat_off.svg")
         elif mode == "all":
-            self.repeat_btn.svg_path = "assets/repeat_on.svg"
-            self.repeat_btn.set_active(True)
+            self.repeat_btn.svg_path = resource_path("assets/repeat_on.svg")
         else:  # "one"
-            self.repeat_btn.svg_path = "assets/repeat_one.svg"
-            self.repeat_btn.set_active(True)
+            self.repeat_btn.svg_path = resource_path("assets/repeat_one.svg")
     
     def update_time_labels(self, current_seconds, total_seconds):
         def format_time(seconds):

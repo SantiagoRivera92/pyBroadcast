@@ -24,3 +24,7 @@ Thumbs.db
 
 # Cache directory
 cache/
+
+# Build stuff
+build/
+dist/

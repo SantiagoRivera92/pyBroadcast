@@ -39,7 +39,7 @@ class iBroadcastAPI:
         self.access_token: Optional[str] = None
         self.refresh_token: Optional[str] = None
         self.session = requests.Session()
-        self.library = {'artists': {}, 'albums': {}, 'tracks': {}, 'playlists': {}}
+        self.library = {'artists': {}, 'albums': {}, 'tracks': {}, 'playlists': {}, 'albumartists': {}}
         
         # Initialize artwork cache
         self.artwork_cache = ArtworkCache()
@@ -127,10 +127,16 @@ class iBroadcastAPI:
                     if not isinstance(album, dict):
                         continue
                     if not album.get('artwork_id'):
-                        for track in self.library['tracks'].values():
-                            if isinstance(track, dict) and track.get('album_id') == album_id and track.get('artwork_id'):
-                                album['artwork_id'] = track['artwork_id']
+                        for track in album.get('tracks', []):
+                            # Find one of the album's tracks with artwork
+                            track_data = self.library['tracks'].get(track)
+                            if isinstance(track_data, dict) and track_data.get('artwork_id'):
+                                album['artwork_id'] = track_data['artwork_id']
                                 break
+                        if not album.get('artwork_id'):
+                            print(f"Album {album_id} missing artwork")
+                    else:
+                        print(f"Album {album.get('name', '')} has artwork")
 
                 # Create AlbumArtists (for artists that have at least one album)
                 album_artist_ids = set()

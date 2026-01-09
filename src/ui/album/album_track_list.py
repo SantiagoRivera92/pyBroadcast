@@ -33,6 +33,7 @@ class AlbumTrackList(QFrame):
                 color: #fff; 
                 font-size: 16px; 
             }
+            QTableView::focus { outline: none; }
             QHeaderView::section { 
                 background-color: #181818; 
                 color: #b3b3b3; 
@@ -43,11 +44,15 @@ class AlbumTrackList(QFrame):
             QTableWidget::item { 
                 padding: 12px 8px;
             }
+            QTableWidget::focus { outline: none; }
             QTableWidget::item:selected { 
-                background-color: #282828; 
+                background-color: #313a4d; 
             }
             QTableWidget::item:hover {
-                background-color: #202020;
+                background-color: #313a4d;
+            }
+            QTableWidget::item:focus {
+                outline: none;
             }
         """)
         
