@@ -22,7 +22,6 @@ class ScrollingLabel(QLabel):
         self.is_scrolling = False
         self.needs_scroll = False
         self.gap = 50
-        self.artist_layout: Optional[QBoxLayout] = None
     
     def setOnClickCallback(self, callback):
         self.onClickCallback = callback

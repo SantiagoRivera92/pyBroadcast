@@ -108,6 +108,9 @@ class iBroadcastAPI:
 
     def load_library(self) -> Dict:
         """Load library from API and sync to SQLite"""
+        oauth_config = get_oauth_config()
+        if not oauth_config['client_id'] or not oauth_config['client_secret']:
+            return {'success': False, 'message': 'Missing iBroadcast OAuth credentials'}
         try:
             url = f"{self.library_url}/s/JSON/library"
             headers = {'Authorization': f'Bearer {self.access_token}', 'Content-Type': 'application/json'}
@@ -179,7 +182,6 @@ class iBroadcastAPI:
             'platform': 'pyBroadcast',
             'version': '0.1'
         }
-        print("Track", track)
         print(f"Generated stream URL for track {track_id}: {self.streaming_server}{track.file}?{urlencode(params)}")
         return f"{self.streaming_server}{track.file}?{urlencode(params)}"
 
@@ -368,3 +370,7 @@ class iBroadcastAPI:
     def get_artists_with_albums(self) -> List[Artist]:
         """Get all artists that have albums."""
         return self.db.get_artists_with_albums()
+    
+    def get_tracks_by_artist(self, artist_id: int) -> List[Track]:
+        """Get all tracks associated with a specific artist."""
+        return self.db.get_tracks_by_artist(artist_id)

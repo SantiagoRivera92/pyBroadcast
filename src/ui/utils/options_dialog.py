@@ -71,7 +71,8 @@ class APICredentialsTab(QWidget):
             "1. Visit https://ibroadcast.com/developer\n"
             "2. Create or log into your account\n"
             "3. Register a new application\n"
-            "4. Copy the Client ID and Client Secret here"
+            "4. Copy the Client ID and Client Secret here\n\n"
+            "You need an iBroadcast account to use this application."
         )
         info_label.setWordWrap(True)
         info_label.setStyleSheet("color: #666; font-size: 11px; margin-top: 10px;")
@@ -121,7 +122,9 @@ class APICredentialsTab(QWidget):
         # Info
         lastfm_info = QLabel(
             "To get your Last.fm API credentials:\n"
-            "Visit https://www.last.fm/api/account/create"
+            "Visit https://www.last.fm/api/account/create\n"
+            "Create an application and obtain your API Key and Shared Secret.\n\n"
+            "You don't need a Last.fm account to use this application"
         )
         lastfm_info.setWordWrap(True)
         lastfm_info.setStyleSheet("color: #666; font-size: 11px; margin-top: 10px;")
@@ -394,7 +397,7 @@ class IBroadcastTab(QWidget):
         class ReloadWorker(QObject):
             finished = pyqtSignal(dict)
 
-            def __init__(self, ibroadcast_api):
+            def __init__(self, ibroadcast_api: iBroadcastAPI):
                 super().__init__()
                 self.ibroadcast_api = ibroadcast_api
 
@@ -417,15 +420,16 @@ class IBroadcastTab(QWidget):
         if result.get('success'):
             self.status_label.setText("Library reloaded successfully!")
         else:
-            self.status_label.setText("Failed to reload library.")
+            self.status_label.setText(f"Failed to reload library: {result.get('message', 'Unknown error')}")
 
 class OptionsDialog(QDialog):
     """Main options dialog with tabbed interface"""
     
-    def __init__(self, lastfm_api: LastFMAPI, ibroadcast_api: iBroadcastAPI, parent=None):
+    def __init__(self, lastfm_api: LastFMAPI, ibroadcast_api: iBroadcastAPI, parent=None, on_close_callback=None):
         super().__init__(parent)
         self.lastfm_api = lastfm_api
         self.ibroadcast_api = ibroadcast_api
+        self.on_close_callback = on_close_callback
         self.init_ui()
     
     def init_ui(self):
@@ -440,14 +444,14 @@ class OptionsDialog(QDialog):
         # Tab widget
         self.tabs = QTabWidget()
 
-        # iBroadcast tab (library reload)
-        self.ibroadcast_tab = IBroadcastTab(self.ibroadcast_api)
-        self.tabs.addTab(self.ibroadcast_tab, "iBroadcast")
-
         # API Credentials tab
         self.api_tab = APICredentialsTab()
         self.tabs.addTab(self.api_tab, "API Credentials")
 
+        # iBroadcast tab (library reload)
+        self.ibroadcast_tab = IBroadcastTab(self.ibroadcast_api)
+        self.tabs.addTab(self.ibroadcast_tab, "Refresh Library")
+        
         # Last.fm Account tab
         self.lastfm_tab = LastFMAccountTab(self.lastfm_api)
         self.tabs.addTab(self.lastfm_tab, "Last.fm Account")
@@ -459,5 +463,8 @@ class OptionsDialog(QDialog):
         close_layout.addStretch()
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.accept)
+        if self.on_close_callback:
+            self.finished.connect(self.on_close_callback)
+            
         close_layout.addWidget(close_btn)
         layout.addLayout(close_layout)

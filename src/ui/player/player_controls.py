@@ -7,11 +7,13 @@ from PyQt6.QtCore import QUrl, QTimer
 
 from src.api.ibroadcast.models import Album, Artist, Track
 from src.ui.utils.scrolling_label import ScrollingLabel
+from src.ui.utils.scrolling_artists_label import ScrollingArtistsLabel
 from src.core.resource_path import resource_path
 
 
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtGui import QPixmap, QIcon, QPainter
+
 
 class SvgButton(QPushButton):
     def __init__(self, svg_path, size=24, parent=None):
@@ -126,9 +128,7 @@ class PlayerControls(QFrame):
         self.album_name.setStyleSheet("background: transparent; color: #b3b3b3; font-size: 13px; border: none; padding: 0; text-decoration: underline;")
         self.album_name.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         self.album_name.onClickCallback = self._on_album_clicked
-        self.artist_name = ScrollingLabel(info_widget)
-        self.artist_name.setText("")
-        self.artist_name.setStyleSheet("background: transparent; color: #b3b3b3; font-size: 13px; border: none; padding: 0; text-decoration: underline; ")
+        self.artist_name = ScrollingArtistsLabel(info_widget, self._on_artist_clicked)
         self.artist_name.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         info_layout.addWidget(self.track_name)
         info_layout.addWidget(self.album_name)
@@ -295,22 +295,8 @@ class PlayerControls(QFrame):
                         self.setStyleSheet("color: #b3b3b3; font-size: 13px; border: none; padding: 0;")
                 return super().eventFilter(a0, a1)
 
-        # Remove previous layout if exists
-        if self.artist_name.artist_layout:
-            QWidget().setLayout(self.artist_name.artist_layout)
-            
-        artist_layout = QHBoxLayout()
-        artist_layout.setContentsMargins(0, 0, 0, 0)
-        artist_layout.setSpacing(0)
-        for idx, artist in enumerate(artists):
-            seg = ArtistSegment(artist.name, artist.id, self.are_albumartists[idx], self.artist_name)
-            artist_layout.addWidget(seg)
-            if idx < len(artists) - 1:
-                comma = QLabel(", ", self.artist_name)
-                comma.setStyleSheet("color: #b3b3b3; font-size: 13px; border: none; padding: 0;")
-                artist_layout.addWidget(comma)
-        self.artist_name.setLayout(artist_layout)
-        self.artist_name.artist_layout = artist_layout
+
+        self.artist_name.setArtists(artists)
 
         if artwork_url:
             request = QNetworkRequest(QUrl(artwork_url))
@@ -394,5 +380,5 @@ class PlayerControls(QFrame):
     def _on_album_clicked(self):
         self.albumClicked.emit(self.album_id)
             
-    def _on_artist_clicked(self, artist):
-        self.artistClicked.emit(artist)
+    def _on_artist_clicked(self, artist_id):
+        self.artistClicked.emit(artist_id)

@@ -24,6 +24,8 @@ from src.ui.queue.queue_sidebar import QueueSidebar
 from src.ui.utils.context_menus import TrackContextMenu
 from src.ui.utils.options_dialog import OptionsDialog
 
+from src.core.credentials_manager import CredentialsManager
+
 class iBroadcastNative(QMainWindow):
     
     def __init__(self):
@@ -264,7 +266,7 @@ class iBroadcastNative(QMainWindow):
     
     def show_options(self):
         """Show the options dialog - NEW"""
-        dialog = OptionsDialog(self.lastfm, self.api, self)
+        dialog = OptionsDialog(self.lastfm, self.api, self, on_close_callback=self.check_auth)
         dialog.exec()
 
     def show_track_context_menu_album(self, pos):
@@ -349,7 +351,14 @@ class iBroadcastNative(QMainWindow):
         self.content_stack.setCurrentWidget(self.search_results_view)
 
     def check_auth(self):
-        """Check if user is authenticated; if not, start OAuth flow."""
+        """Check if iBroadcast credentials are present and user is authenticated; if not, prompt for credentials or start OAuth flow."""
+
+        if not CredentialsManager.has_ibroadcast_credentials():
+            self.controls.track_info.setText("Please enter your iBroadcast Client ID and Secret in the settings to continue.")
+            # Automatically open settings dialog and switch to credentials tab
+            dialog = OptionsDialog(self.lastfm, self.api, self, on_close_callback=self.check_auth)
+            dialog.exec()
+            return
         if self.api.access_token:
             res = self.api.load_library()
             if res.get('success'):
@@ -422,14 +431,34 @@ class iBroadcastNative(QMainWindow):
             albums = self.api.get_artist_albums(artist_id)
         else:
             albums = self.api.get_albums()
-        for album in albums:
-            artwork_id = None
-            tracks = self.api.get_tracks_by_album(album.id)
-            for track in tracks:
-                if track.artwork_id != 0:
-                    artwork_id = track.artwork_id
-                    break
-            self.albums_view.add_item(album, self.api.get_artwork_url(artwork_id))
+        if albums:
+            for album in albums:
+                artwork_id = None
+                tracks = self.api.get_tracks_by_album(album.id)
+                for track in tracks:
+                    if track.artwork_id != 0:
+                        artwork_id = track.artwork_id
+                        break
+                self.albums_view.add_item(album, self.api.get_artwork_url(artwork_id))
+        else:
+            # No albums found: Find the songs where the artist appears, then get those albums.
+            if artist_id:
+                tracks = self.api.get_tracks_by_artist(artist_id)
+                album_ids = set()
+                for track in tracks:
+                    album = self.api.get_album_by_track(track.id)
+                    if album:
+                        album_ids.add(album.id)
+                for album_id in album_ids:
+                    album = self.api.get_album_by_id(album_id)
+                    if album:
+                        artwork_id = None
+                        album_tracks = self.api.get_tracks_by_album(album.id)
+                        for track in album_tracks:
+                            if track.artwork_id != 0:
+                                artwork_id = track.artwork_id
+                                break
+                        self.albums_view.add_item(album, self.api.get_artwork_url(artwork_id))
             
     def show_album_detail(self, album_id, push_to_stack=True):
         if isinstance(album_id, int):
@@ -448,7 +477,7 @@ class iBroadcastNative(QMainWindow):
         if not album:
             return
         artists = self.api.get_artists_by_album(album_id)
-        artist_name = ",".join([a.name for a in artists]) if artists else "Unknown Artist"
+        artist_name = ", ".join([a.name for a in artists]) if artists else "Unknown Artist"
         year = album.year
         tracks = self.api.get_tracks_by_album(album_id)
         artwork_url = None
@@ -507,8 +536,12 @@ class iBroadcastNative(QMainWindow):
             self.playlists_view.add_item(playlist, self.api.get_artwork_url(playlist.artwork_id))
 
     def show_artist_albums(self, artist_id, push_to_stack=True):
+        
         if isinstance(artist_id, int):
             artist = self.api.get_artist_by_id(artist_id)
+        elif isinstance(artist_id, str) and artist_id.isdigit():
+            artist = self.api.get_artist_by_id(int(artist_id))
+            artist_id = int(artist_id)
         elif isinstance(artist_id, Artist):
             artist = artist_id
             artist_id = artist.id
@@ -867,7 +900,7 @@ class iBroadcastNative(QMainWindow):
             track = self.api.get_track_by_id(self.current_track_id)
             if track:
                 artists = self.api.get_artists_by_track(int(self.current_track_id))
-                artist_name = ",".join([a.name for a in artists]) if artists else "Unknown Artist"
+                artist_name = ", ".join([a.name for a in artists]) if artists else "Unknown Artist"
                 tracks_data.append({
                     'title': track.name,
                     'artist': artist_name,
@@ -880,7 +913,7 @@ class iBroadcastNative(QMainWindow):
             track = self.api.get_track_by_id(track_id)
             if track:
                 artists = self.api.get_artists_by_track(int(track_id))
-                artist_name = ",".join([a.name for a in artists]) if artists else "Unknown Artist"
+                artist_name = ", ".join([a.name for a in artists]) if artists else "Unknown Artist"
                 tracks_data.append({
                     'title': track.name,
                     'artist': artist_name,
