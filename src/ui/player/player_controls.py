@@ -1,16 +1,19 @@
 from typing import Optional
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QLabel, QPushButton, QSlider, QSizePolicy
-from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, pyqtSignal
+from PyQt6.QtWidgets import QWidget,QFrame, QHBoxLayout, QVBoxLayout, QLabel, QPushButton, QSlider, QSizePolicy
+from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtGui import QPixmap, QImage, QIcon
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PyQt6.QtCore import QUrl, QTimer
 
+from src.api.ibroadcast.models import Album, Artist, Track
 from src.ui.utils.scrolling_label import ScrollingLabel
+from src.ui.utils.scrolling_artists_label import ScrollingArtistsLabel
 from src.core.resource_path import resource_path
 
 
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtGui import QPixmap, QIcon, QPainter
+
 
 class SvgButton(QPushButton):
     def __init__(self, svg_path, size=24, parent=None):
@@ -125,11 +128,8 @@ class PlayerControls(QFrame):
         self.album_name.setStyleSheet("background: transparent; color: #b3b3b3; font-size: 13px; border: none; padding: 0; text-decoration: underline;")
         self.album_name.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         self.album_name.onClickCallback = self._on_album_clicked
-        self.artist_name = ScrollingLabel(info_widget)
-        self.artist_name.setText("")
-        self.artist_name.setStyleSheet("background: transparent; color: #b3b3b3; font-size: 13px; border: none; padding: 0; text-decoration: underline; ")
+        self.artist_name = ScrollingArtistsLabel(info_widget, self._on_artist_clicked)
         self.artist_name.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
-        self.artist_name.onClickCallback = self._on_artist_clicked
         info_layout.addWidget(self.track_name)
         info_layout.addWidget(self.album_name)
         info_layout.addWidget(self.artist_name)
@@ -268,19 +268,36 @@ class PlayerControls(QFrame):
         else:
             self.volume_icon.svg_path = resource_path("assets/volume_up.svg")
     
-    def set_track_info(self, track_name, album_name, artist_name, artwork_url, album_id: Optional[int], artist_id: Optional[int], is_albumartist: bool):
-        self.track_name.setText(track_name)
-        self.album_name.setText(album_name)
-        self.artist_name.setText(artist_name)
-        self.album_id = album_id
-        self.artist_id = artist_id
-        self.is_albumartist = is_albumartist
-        if is_albumartist:
-            self.artist_name.setStyleSheet("background: transparent; color: #b3b3b3; font-size: 13px; border: none; padding: 0; text-decoration: underline;")
-        else:
-            self.artist_name.setStyleSheet("background: transparent; color: #b3b3b3; font-size: 13px; border: none; padding: 0; text-decoration: none;")
+    def set_track_info(self, track:Track, album:Optional[Album], artists: list[Artist], album_artists: list[Artist], artwork_url):
+        self.track_name.setText(track.name)
+        self.album_name.setText(album.name if album else "Unknown Album")
+        self.album_id = album.id if album else None
+        self.artist_ids = [artist.id for artist in artists]
+        self.are_albumartists = [artist.id in [a.id for a in album_artists] for artist in artists]
 
-        
+        # Build artist label with clickable segments, underline on hover, no HTML
+        class ArtistSegment(QLabel):
+            def __init__(self, name, artist_id=None, is_albumartist=False, parent=None):
+                super().__init__(name, parent)
+                self.artist_id = artist_id
+                self.is_albumartist = is_albumartist
+                self.setStyleSheet("color: #b3b3b3; font-size: 13px; border: none; padding: 0;")
+                if is_albumartist:
+                    self.setCursor(Qt.CursorShape.PointingHandCursor)
+                self.installEventFilter(self)
+
+            def eventFilter(self, a0, a1):
+                from PyQt6.QtCore import QEvent
+                if self.is_albumartist:
+                    if a1 and a1.type() == QEvent.Type.Enter:
+                        self.setStyleSheet("color: #b3b3b3; font-size: 13px; border: none; padding: 0; text-decoration: underline;")
+                    elif a1 and a1.type() == QEvent.Type.Leave:
+                        self.setStyleSheet("color: #b3b3b3; font-size: 13px; border: none; padding: 0;")
+                return super().eventFilter(a0, a1)
+
+
+        self.artist_name.setArtists(artists)
+
         if artwork_url:
             request = QNetworkRequest(QUrl(artwork_url))
             reply = self.network_manager.get(request)
@@ -363,6 +380,5 @@ class PlayerControls(QFrame):
     def _on_album_clicked(self):
         self.albumClicked.emit(self.album_id)
             
-    def _on_artist_clicked(self):
-        if self.is_albumartist:
-           self.artistClicked.emit(self.artist_id)
+    def _on_artist_clicked(self, artist_id):
+        self.artistClicked.emit(artist_id)

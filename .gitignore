@@ -28,3 +28,7 @@ cache/
 # Build stuff
 build/
 dist/
+raw/
+
+# The database itself
+library.db

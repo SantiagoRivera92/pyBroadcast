@@ -125,14 +125,23 @@ class CredentialsManager:
     
     @classmethod
     def clear_ibroadcast_credentials(cls) -> bool:
-        """Clear all iBroadcast credentials"""
+        """Clear all iBroadcast credentials. Ignores errors for non-existent keys."""
         keys = [
             cls.IBROADCAST_CLIENT_ID,
             cls.IBROADCAST_CLIENT_SECRET,
             cls.IBROADCAST_ACCESS_TOKEN,
             cls.IBROADCAST_REFRESH_TOKEN,
         ]
-        return all(cls.delete_credential(key) for key in keys)
+        results = []
+        for key in keys:
+            try:
+                cls.delete_credential(key)
+                results.append(True)
+            except Exception as e:
+                # Ignore error if key does not exist or other issues
+                print(f"Error deleting credential {key}: {e}")
+                results.append(True)
+        return all(results)
     
     @classmethod
     def clear_lastfm_credentials(cls) -> bool:

@@ -3,12 +3,56 @@ from PyQt6.QtWidgets import QScrollArea, QGridLayout, QWidget, QVBoxLayout, QFra
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PyQt6.QtCore import QUrl, Qt, QTimer, QRect
 
+from src.api.ibroadcast.ibroadcast_api import iBroadcastAPI
 from src.ui.utils.rounded_image import RoundedImage
 from src.ui.utils.hoverable_widget import HoverableWidget
 from src.ui.utils.scrolling_label import ScrollingLabel
 
+from src.api.ibroadcast.models import BaseModel, Track, Album, Artist, Playlist
+
+class LibraryItem():
+    def __init__(self, model: BaseModel, image_url: str):
+        self.model = model
+        self.image_url = image_url
+        
+    def get_title(self):
+        return self.model.name
+    
+    def get_subtitle(self, api: iBroadcastAPI):
+        if isinstance(self.model, Track):
+            # For tracks, get album name
+            album = api.get_album_by_track(self.model.id)
+            return album.name if album else "Unknown Album"
+        elif isinstance(self.model, Album):
+            # For albums, get artist name
+            artists = api.get_artists_by_album(self.model.id)
+            return ", ".join([a.name for a in artists]) if artists else "Unknown Artist"
+        elif isinstance(self.model, Artist):
+            # For artists, there's no need for a subtitle
+            return None
+        elif isinstance(self.model, Playlist):
+            # For playlists, use description if available
+            return self.model.description or ""
+        return None
+        
+    def get_second_subtitle(self, api: iBroadcastAPI):
+        if isinstance(self.model, Track):
+            # For tracks, get artist name
+            artists = api.get_artists_by_track(self.model.id)
+            return ", ".join([a.name for a in artists]) if artists else "Unknown Artist"
+        elif isinstance(self.model, Album):
+            # For albums, return the year
+            return f"{self.model.year}"
+        elif isinstance(self.model, Artist):
+            # For artists, no need for a subtitle
+            return None
+        elif isinstance(self.model, Playlist):
+            # For playlists, no second subtitle
+            return None
+        return None
+
 class LibraryGrid(QScrollArea):
-    def __init__(self, item_click_callback):
+    def __init__(self, item_click_callback, api: iBroadcastAPI):
         super().__init__()
         self.setWidgetResizable(True)
         self.setStyleSheet("QScrollArea { border: none; background-color: #0f0f0f; }")
@@ -19,7 +63,7 @@ class LibraryGrid(QScrollArea):
         self.grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.grid.setSpacing(10)
         self.grid.setContentsMargins(10, 10, 10, 10)
-        
+        self.api = api
         
         self.setWidget(self.container)
         
@@ -37,7 +81,7 @@ class LibraryGrid(QScrollArea):
         self.max_concurrent = 4
         
         # Queue for items to add
-        self.items_queue = []
+        self.items_queue : list[LibraryItem] = []
         self.current_row = 0
         self.current_col = 0
         self.columns = 5 
@@ -74,16 +118,11 @@ class LibraryGrid(QScrollArea):
                 if item_widget:
                     item_widget.deleteLater()
 
-    def add_item(self, title, subtitle, image_url, item_id, second_subtitle=None, row=None, col=None):
+    def add_item(self, model: BaseModel, image_url: str):
         """Add item to grid. If row/col are None, auto-calculate based on current position"""
         # Queue the item for processing
-        self.items_queue.append({
-            'title': title,
-            'subtitle': subtitle,
-            'image_url': image_url,
-            'item_id': item_id,
-            'second_subtitle': second_subtitle
-        })
+        libraryItem = LibraryItem(model, image_url)
+        self.items_queue.append(libraryItem)
         
         # Process queue on next event loop
         QTimer.singleShot(0, self.process_items_queue)
@@ -99,17 +138,11 @@ class LibraryGrid(QScrollArea):
         # Add all queued items
         while self.items_queue:
             item_data = self.items_queue.pop(0)
-            self._add_item_to_grid(
-                item_data['title'],
-                item_data['subtitle'],
-                item_data['image_url'],
-                item_data['item_id'],
-                item_data['second_subtitle']
-            )
+            self._add_item_to_grid(item_data)
 
-    def _add_item_to_grid(self, title, subtitle, image_url, item_id, second_subtitle=None):
+    def _add_item_to_grid(self, library_item: LibraryItem):
         """Internal method to add item to grid at current position"""
-        item_widget = HoverableWidget(self.callback, item_id)
+        item_widget = HoverableWidget(self.callback, library_item.model)
         layout = QVBoxLayout(item_widget)
 
         img_label = RoundedImage()
@@ -117,11 +150,11 @@ class LibraryGrid(QScrollArea):
         img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Add to queue instead of starting immediately
-        if image_url:
-            self.pending_items.append({'label': img_label, 'url': image_url, 'started': False})
+        if library_item.image_url:
+            self.pending_items.append({'label': img_label, 'url': library_item.image_url, 'started': False})
         
         t_label = ScrollingLabel(item_widget)
-        t_label.setText(title)
+        t_label.setText(library_item.get_title())
         t_label.setGap(25)
         t_label.setStyleSheet('''
             QLabel {
@@ -136,7 +169,7 @@ class LibraryGrid(QScrollArea):
         t_label.setFixedHeight(28)
 
         s_label = ScrollingLabel(item_widget)
-        s_label.setText(subtitle)
+        s_label.setText(library_item.get_subtitle(self.api) or "")
         s_label.setGap(25)
         s_label.setStyleSheet('''
             QLabel {
@@ -152,21 +185,20 @@ class LibraryGrid(QScrollArea):
         layout.addWidget(t_label)
         layout.addWidget(s_label)
         
-        if second_subtitle:
-            ss_label = ScrollingLabel(item_widget)
-            ss_label.setText(str(second_subtitle))
-            ss_label.setGap(25)
-            ss_label.setStyleSheet('''
-                QLabel {
-                    color: #b3b3b3;
-                    font-size: 14px;
-                    margin-left: 2px;
-                }
-            ''')
-            ss_label.setWordWrap(True)
-            ss_label.setFixedWidth(self.item_width + 2)
-            layout.addWidget(ss_label)
-
+        
+        ss_label = ScrollingLabel(item_widget)
+        ss_label.setText(library_item.get_second_subtitle(self.api) or "")
+        ss_label.setGap(25)
+        ss_label.setStyleSheet('''
+            QLabel {
+                color: #b3b3b3;
+                font-size: 14px;
+                margin-left: 2px;
+            }
+        ''')
+        ss_label.setWordWrap(True)
+        ss_label.setFixedWidth(self.item_width + 2)
+        layout.addWidget(ss_label)
         
         # Add to grid at current position
         self.grid.addWidget(item_widget, self.current_row, self.current_col)

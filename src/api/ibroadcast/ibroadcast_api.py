@@ -5,8 +5,10 @@ import secrets
 import base64
 import hashlib
 import threading
-import socket
 import time
+from src.core.credentials_manager import CredentialsManager
+
+from typing import List
 
 from http.server import HTTPServer
 from urllib.parse import urlencode
@@ -14,20 +16,19 @@ from typing import Dict, Optional
 
 from src.api.ibroadcast.oauth_callback_handler import OAuthCallbackHandler
 from src.api.artwork_cache import ArtworkCache
+from src.api.ibroadcast.database import DatabaseManager
+from src.api.ibroadcast.models import Artist, Album, Track, Playlist, BaseModel
 
-from dotenv import load_dotenv
-
-load_dotenv()
-
-OAUTH_CONFIG = {
-    'client_id': os.getenv('IBROADCAST_CLIENT_ID', ''),
-    'client_secret': os.getenv('IBROADCAST_CLIENT_SECRET', ''),
-    'redirect_uri': 'http://localhost:8888/callback',
-    'authorization_url': 'https://oauth.ibroadcast.com/authorize',
-    'token_url': 'https://oauth.ibroadcast.com/token',
-    'device_code_url': 'https://oauth.ibroadcast.com/device/code',
-    'scopes': 'user.library:read user.queue:read user.queue:write'
-}
+def get_oauth_config():
+    return {
+        'client_id': CredentialsManager.get_credential(CredentialsManager.IBROADCAST_CLIENT_ID) or '',
+        'client_secret': CredentialsManager.get_credential(CredentialsManager.IBROADCAST_CLIENT_SECRET) or '',
+        'redirect_uri': 'http://localhost:8888/callback',
+        'authorization_url': 'https://oauth.ibroadcast.com/authorize',
+        'token_url': 'https://oauth.ibroadcast.com/token',
+        'device_code_url': 'https://oauth.ibroadcast.com/device/code',
+        'scopes': 'user.library:read user.queue:read user.queue:write'
+    }
 
 TOKEN_FILE = 'token.json'
 
@@ -39,9 +40,9 @@ class iBroadcastAPI:
         self.access_token: Optional[str] = None
         self.refresh_token: Optional[str] = None
         self.session = requests.Session()
-        self.library = {'artists': {}, 'albums': {}, 'tracks': {}, 'playlists': {}, 'albumartists': {}}
         
-        # Initialize artwork cache
+        # Initialize database and artwork cache
+        self.db = DatabaseManager()
         self.artwork_cache = ArtworkCache()
         
         self.load_cached_token()
@@ -71,10 +72,45 @@ class iBroadcastAPI:
             os.remove(TOKEN_FILE)
         self.access_token = None
         self.refresh_token = None
-        self.library = {'artists': {}, 'albums': {}, 'tracks': {}, 'playlists': {}}
+        self.db.clear_database()
+
+    def _process_section(self, lib_data, section_name):
+        """Helper to decode iBroadcast map-based JSON response"""
+        section = lib_data.get(section_name, {})
+        index_map = section.get('map', {})
+        processed = {}
+        
+        for item_id, item_data in section.items():
+            if item_id == 'map': continue
+            if isinstance(item_data, list):
+                obj = {}
+                for key, index in index_map.items():
+                    if key != "artists_additional":
+                        if isinstance(index, int) and index < len(item_data):
+                            val = item_data[index]
+                            # Force ID types
+                            if (key.endswith("_id") or key == "artwork_id") and isinstance(val, str) and val.isdigit():
+                                val = int(val)
+                            obj[key] = val
+                    else:
+                        additional = []
+                        add_map = index_map.get('artists_additional_map', {})
+                        if item_data is not None and index < len(item_data) and item_data[index] is not None:
+                            for item in item_data[index]:
+                                add_obj = {k: item[i] for k, i in add_map.items() if isinstance(i, int) and i < len(item)}
+                                additional.append(add_obj)
+                        obj[key] = additional
+                
+                final_id = int(item_id) if str(item_id).isdigit() else item_id
+                obj['item_id'] = final_id
+                processed[final_id] = obj
+        return processed
 
     def load_library(self) -> Dict:
-        """Load library using the API's index mapping system"""
+        """Load library from API and sync to SQLite"""
+        oauth_config = get_oauth_config()
+        if not oauth_config['client_id'] or not oauth_config['client_secret']:
+            return {'success': False, 'message': 'Missing iBroadcast OAuth credentials'}
         try:
             url = f"{self.library_url}/s/JSON/library"
             headers = {'Authorization': f'Bearer {self.access_token}', 'Content-Type': 'application/json'}
@@ -87,151 +123,134 @@ class iBroadcastAPI:
                 return {'success': False, 'message': 'Auth expired'}
 
             if 'settings' in data:
-                streaming_server = data['settings'].get('streaming_server')
-                if streaming_server:
-                    self.streaming_server = streaming_server
+                self.streaming_server = data['settings'].get('streaming_server', self.streaming_server)
 
             if 'library' in data:
                 lib = data['library']
-                
-                def process_section(section_name):
-                    section = lib.get(section_name, {})
-                    index_map = section.get('map', {})
-                    processed = {}
-                    
-                    for item_id, item_data in section.items():
-                        if item_id == 'map': continue
-                        
-                        # Convert array to dict using the map
-                        if isinstance(item_data, list):
-                            obj = {}
-                            for key, index in index_map.items():
-                                if isinstance(index, int):
-                                    if index < len(item_data):
-                                        obj[key] = item_data[index]
-                                elif key != "artists_additional_map":
-                                    print(f"Unexpected index type for key {key}: {index}")
-                            obj['item_id'] = item_id
-                            processed[int(item_id)] = obj
-                        elif isinstance(item_data, dict):
-                            processed[int(item_id)] = item_data
-                    return processed
+                processed_lib = {
+                    'artists': self._process_section(lib, 'artists'),
+                    'albums': self._process_section(lib, 'albums'),
+                    'tracks': self._process_section(lib, 'tracks'),
+                    'playlists': self._process_section(lib, 'playlists')
+                }
 
-                self.library['artists'] = process_section('artists')
-                self.library['albums'] = process_section('albums')
-                self.library['tracks'] = process_section('tracks')
-                self.library['playlists'] = process_section('playlists')
-
-                # Fill in missing artwork for albums
-                for album_id, album in self.library['albums'].items():
-                    if not isinstance(album, dict):
-                        continue
-                    if not album.get('artwork_id'):
-                        for track in album.get('tracks', []):
-                            # Find one of the album's tracks with artwork
-                            track_data = self.library['tracks'].get(track)
-                            if isinstance(track_data, dict) and track_data.get('artwork_id'):
-                                album['artwork_id'] = track_data['artwork_id']
+                # Backfill missing Album artwork from its children tracks
+                for al_id, al in processed_lib['albums'].items():
+                    if not al.get('artwork_id'):
+                        for t_id in al.get('tracks', []):
+                            track_data = processed_lib['tracks'].get(t_id)
+                            if track_data and track_data.get('artwork_id'):
+                                al['artwork_id'] = track_data['artwork_id']
                                 break
-                        if not album.get('artwork_id'):
-                            print(f"Album {album_id} missing artwork")
-                    else:
-                        print(f"Album {album.get('name', '')} has artwork")
 
-                # Create AlbumArtists (for artists that have at least one album)
-                album_artist_ids = set()
-                for album in self.library['albums'].values():
-                    if isinstance(album, dict) and 'artist_id' in album:
-                        album_artist_ids.add(album['artist_id'])
-                self.library['albumartists'] = {aid: artist for aid, artist in self.library['artists'].items() if aid in album_artist_ids}
-
-                # Sort albums by artist and release date
-                self.library['albums'] = dict(sorted(
-                    self.library['albums'].items(),
-                    key=lambda x: (
-                        self.library['artists'].get(self.library['albums'][x[0]].get('artist_id', -1), {}).get('name', ''),
-                        self.library['albums'][x[0]].get('release_date', '')
-                    )
-                ))
-
+                # Save to DB
+                self.db.sync_library(processed_lib)
                 self.save_token()
-                
-                # Start pre-caching artworks in background
+
+                # Start background caching
                 threading.Thread(target=self._precache_artworks, daemon=True).start()
-                
+
                 return {'success': True}
             return {'success': False}
         except Exception as e:
+            raise e
             return {'success': False, 'message': str(e)}
     
     def _precache_artworks(self):
-        """Background task to pre-cache all artworks"""
+        """Background task to pre-cache all artworks from DB references"""
         print("Starting artwork pre-caching...")
+        artwork_ids = self.db.get_all_artwork_ids()
         
-        # Cache album artworks (most important)
-        for album in self.library['albums'].values():
-            artwork_id = album.get('artwork_id')
-            if artwork_id and not self.artwork_cache.is_cached(artwork_id):
+        for artwork_id in artwork_ids:
+            if not self.artwork_cache.is_cached(artwork_id):
                 artwork_url = f"https://artwork.ibroadcast.com/artwork/{artwork_id}"
                 self.artwork_cache.download_and_cache(artwork_url, artwork_id)
         
-        # Cache artist artworks
-        for artist in self.library['artists'].values():
-            artwork_id = artist.get('artwork_id')
-            if artwork_id and not self.artwork_cache.is_cached(artwork_id):
-                artwork_url = f"https://artwork.ibroadcast.com/artwork/{artwork_id}"
-                self.artwork_cache.download_and_cache(artwork_url, artwork_id)
+        print(f"Artwork caching complete. Total cached: {self.artwork_cache.get_cache_count()}")
+
+    def get_stream_url(self, track_id: int) -> str:
+        """Get streaming URL by querying the database"""
+        track = self.db.get_track_by_id(track_id)
+        if not track or not track.file:
+            return ""
         
-        print(f"Artwork caching complete. Cached {self.artwork_cache.get_cache_count()} images.")
+        expires = int(time.time() * 1000)
+        params = {
+            'Expires': expires,
+            'Signature': self.access_token,
+            'file_id': track.file,
+            'platform': 'pyBroadcast',
+            'version': '0.1'
+        }
+        print(f"Generated stream URL for track {track_id}: {self.streaming_server}{track.file}?{urlencode(params)}")
+        return f"{self.streaming_server}{track.file}?{urlencode(params)}"
+
+    def get_artwork_url(self, artwork_id: Optional[int], use_cache: bool = True) -> str:
+        if not artwork_id or artwork_id == 0:
+            return ""
+        if use_cache:
+            cached_url = self.artwork_cache.get_cached_url(artwork_id)
+            if cached_url:
+                return cached_url
+        return f"https://artwork.ibroadcast.com/artwork/{artwork_id}"
+
+    # --- Playlist Operations ---
+    # These call the API and then trigger a reload of the library to keep the DB in sync.
+
+    def create_playlist(self, name: str, **kwargs) -> Dict:
+        url = f"{self.base_url}/s/JSON/playlists"
+        data = {'mode': 'createplaylist', 'name': name, **kwargs}
+        headers = {'Authorization': f'Bearer {self.access_token}'}
         
+        response = self.session.post(url, json=data, headers=headers)
+        if response.status_code == 200:
+            self.load_library() # Update local DB
+            return {'success': True, **response.json()}
+        return {'success': False, 'message': 'API Error'}
+
+    def append_to_playlist(self, playlist_id: int, tracks: list) -> Dict:
+        url = f"{self.base_url}/s/JSON/playlists"
+        data = {'mode': 'appendplaylist', 'playlist_id': playlist_id, 'tracks': tracks}
+        headers = {'Authorization': f'Bearer {self.access_token}'}
+        
+        if self.session.post(url, json=data, headers=headers).status_code == 200:
+            self.load_library()
+            return {'success': True}
+        return {'success': False}
+
+    # --- OAuth Logic ---
+
     def generate_pkce_pair(self):
-        """Generate PKCE code_verifier and code_challenge"""
         self.code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode('utf-8').rstrip('=')
         challenge_bytes = hashlib.sha256(self.code_verifier.encode('utf-8')).digest()
-        code_challenge = base64.urlsafe_b64encode(challenge_bytes).decode('utf-8').rstrip('=')
-        return code_challenge
-    
+        return base64.urlsafe_b64encode(challenge_bytes).decode('utf-8').rstrip('=')
+
     def start_oauth_flow(self) -> Dict:
-        """Start OAuth authorization flow using authorization_code grant"""
         try:
+            oauth_config = get_oauth_config()
             code_challenge = self.generate_pkce_pair()
             self.oauth_state = secrets.token_urlsafe(32)
-            
             params = {
-                'client_id': OAUTH_CONFIG['client_id'],
+                'client_id': oauth_config['client_id'],
                 'state': self.oauth_state,
                 'response_type': 'code',
                 'code_challenge': code_challenge,
                 'code_challenge_method': 'S256',
-                'scope': OAUTH_CONFIG['scopes'],
-                'redirect_uri': OAUTH_CONFIG['redirect_uri']
+                'scope': oauth_config['scopes'],
+                'redirect_uri': oauth_config['redirect_uri']
             }
-            
-            auth_url = f"{OAUTH_CONFIG['authorization_url']}?{urlencode(params)}"
+            auth_url = f"{oauth_config['authorization_url']}?{urlencode(params)}"
             self.start_callback_server()
-            
             return {'success': True, 'auth_url': auth_url}
         except Exception as e:
             return {'success': False, 'message': str(e)}
-    
+
     def start_callback_server(self):
-        """Start HTTP server to handle OAuth callback"""
         def run_server():
-            try:
-                server = HTTPServer(('localhost', 8888), OAuthCallbackHandler)
-                server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                server.timeout = 300
-                server.handle_request()
-                server.server_close()
-            except Exception as e:
-                print(f"Callback server error: {e}")
+            server = HTTPServer(('localhost', 8888), OAuthCallbackHandler)
+            server.handle_request()
+        threading.Thread(target=run_server, daemon=True).start()
         
-        OAuthCallbackHandler.auth_code = None
-        OAuthCallbackHandler.auth_state = None
-        
-        thread = threading.Thread(target=run_server, daemon=True)
-        thread.start()
-    
     def check_callback_status(self) -> Dict:
         """Check if OAuth callback has been received"""
         if OAuthCallbackHandler.auth_code is not None:
@@ -245,376 +264,113 @@ class iBroadcastAPI:
             return {'success': True, 'code': auth_code}
         
         return {'success': False, 'pending': True}
-    
+
     def exchange_code_for_token(self, auth_code: str) -> Dict:
-        """Exchange authorization code for access token"""
-        try:
-            data = {
-                'grant_type': 'authorization_code',
-                'code': auth_code,
-                'client_id': OAUTH_CONFIG['client_id'],
-                'redirect_uri': OAUTH_CONFIG['redirect_uri'],
-                'code_verifier': self.code_verifier
-            }
-            
-            response = requests.post(
-                OAUTH_CONFIG['token_url'],
-                data=data,
-                headers={'Content-Type': 'application/x-www-form-urlencoded'}
-            )
-            
-            if response.status_code == 200:
-                token_data = response.json()
-                self.access_token = token_data['access_token']
-                self.refresh_token = token_data['refresh_token']
-                self.save_token()
-                return {'success': True, 'authenticated': True}
-            else:
-                error_data = response.json() if response.headers.get('content-type') == 'application/json' else {}
-                return {'success': False, 'message': error_data.get('error_description', f'HTTP {response.status_code}')}
-        except Exception as e:
-            return {'success': False, 'message': str(e)}
-    
+        oauth_config = get_oauth_config()
+        data = {
+            'grant_type': 'authorization_code',
+            'code': auth_code,
+            'client_id': oauth_config['client_id'],
+            'redirect_uri': oauth_config['redirect_uri'],
+            'code_verifier': self.code_verifier
+        }
+        resp = requests.post(oauth_config['token_url'], data=data)
+        if resp.status_code == 200:
+            token_data = resp.json()
+            self.access_token = token_data['access_token']
+            self.refresh_token = token_data['refresh_token']
+            self.save_token()
+            return {'success': True}
+        return {'success': False}
+
     def refresh_access_token(self) -> bool:
-        """Refresh the access token"""
-        try:
-            data = {
-                'grant_type': 'refresh_token',
-                'refresh_token': self.refresh_token,
-                'client_id': OAUTH_CONFIG['client_id'],
-                'redirect_uri': OAUTH_CONFIG['redirect_uri']
-            }
-            
-            response = requests.post(
-                OAUTH_CONFIG['token_url'],
-                data=data,
-                headers={'Content-Type': 'application/x-www-form-urlencoded'}
-            )
-            
-            if response.status_code == 200:
-                token_data = response.json()
-                self.access_token = token_data['access_token']
-                self.refresh_token = token_data['refresh_token']
-                self.save_token()
-                return True
-            return False
-        except Exception as e:
-            return False
-
-    def get_stream_url(self, track_id: int) -> str:
-        """
-        Get streaming URL for a track following iBroadcast's streaming format.
-        
-        Format: [streaming_server]/[bitrate]/[url]?Expires=[now]&Signature=[token]&file_id=[file_id]&user_id=[user_id]&platform=native&version=1.0
-        
-        Args:
-            track_id: The track ID
-            bitrate: Desired bitrate (96, 128, 192, 256, 320, orig)
-        
-        Returns:
-            Complete streaming URL
-        """
-
-        track = None
-        for tr in self.library['tracks'].values():
-            if str(tr.get('item_id')) == str(track_id):
-                track = tr
-                break
-
-        if not track:
-            return ""
-
-        # Get track URL and file_id from library
-        file_id = track.get('file', '')
-        
-        if not file_id:
-            print("Missing data for streaming URL")
-            return ""
-        
-        # Current timestamp in milliseconds
-        expires = int(time.time() * 1000)
-        
-        # Build query parameters
-        params = {
-            'Expires': expires,
-            'Signature': self.access_token,
-            'file_id': file_id,
-            'platform': 'pyBroadcast',
-            'version': '0.1'
+        oauth_config = get_oauth_config()
+        data = {
+            'grant_type': 'refresh_token',
+            'refresh_token': self.refresh_token,
+            'client_id': oauth_config['client_id']
         }
-        
-        # Construct final URL
-        stream_url = f"{self.streaming_server}{file_id}?{urlencode(params)}"
-        
-        return stream_url
-    
-    def get_artwork_url(self, artwork_id: Optional[str], use_cache: bool = True) -> str:
-        """Get artwork URL, checking cache first if enabled"""
-        if not artwork_id:
-            return ""
-        
-        # Check cache first if enabled
-        if use_cache:
-            cached_url = self.artwork_cache.get_cached_url(artwork_id)
-            if cached_url:
-                return cached_url
-        
-        # Return remote URL
-        return f"https://artwork.ibroadcast.com/artwork/{artwork_id}"
-    
-    def get_cache_stats(self) -> Dict:
-        """Get cache statistics"""
-        return {
-            'count': self.artwork_cache.get_cache_count(),
-            'size_mb': self.artwork_cache.get_cache_size() / (1024 * 1024)
-        }
-    
-    def clear_cache(self):
-        """Clear artwork cache"""
-        self.artwork_cache.clear_cache()
+        resp = requests.post(oauth_config['token_url'], data=data)
+        if resp.status_code == 200:
+            token_data = resp.json()
+            self.access_token = token_data['access_token']
+            self.refresh_token = token_data['refresh_token']
+            self.save_token()
+            return True
+        return False
 
-    def create_playlist(self, name: str, description: str = "", make_public: bool = False, 
-                       tracks: Optional[list] = None, mood: Optional[str] = None, seed: Optional[int] = None) -> Dict:
-        """
-        Create a new playlist
-        
-        Args:
-            name: Display name for the playlist
-            description: Brief description of playlist contents
-            make_public: Whether playlist should be public
-            tracks: List of track IDs to populate playlist (optional)
-            mood: Mood for auto-generation (optional): happy, party, dance, relaxed, workout, chill
-            seed: Track ID to seed similar track generation (optional)
-        
-        Returns:
-            Dict with success status, playlist_id, and public_id
-        """
-        try:
-            url = f"{self.base_url}/s/JSON/playlists"
-            headers = {'Authorization': f'Bearer {self.access_token}', 'Content-Type': 'application/json'}
-            
-            data = {
-                'mode': 'createplaylist',
-                'name': name,
-                'description': description,
-                'make_public': make_public
-            }
-            
-            if mood:
-                data['mood'] = mood
-            elif seed:
-                data['seed'] = seed
-            elif tracks is not None:
-                data['tracks'] = tracks
-            else:
-                data['tracks'] = []
-            
-            response = self.session.post(url, json=data, headers=headers)
-            result = response.json()
-            
-            if response.status_code == 200 and 'playlist_id' in result:
-                # Reload library to get the new playlist
-                self.load_library()
-                return {
-                    'success': True,
-                    'playlist_id': result['playlist_id'],
-                    'public_id': result.get('public_id'),
-                    'tracks': result.get('tracks', [])
-                }
-            else:
-                return {'success': False, 'message': result.get('message', 'Failed to create playlist')}
-        except Exception as e:
-            return {'success': False, 'message': str(e)}
+    def get_artists(self) -> List[Artist]:
+        """Returns all artists sorted by name."""
+        return self.db.get_all_artists()
+
+    def get_artist_albums(self, artist_id: int) -> List[Album]:
+        """Returns all albums for a specific artist (including featured)."""
+        return self.db.get_albums_by_artist(artist_id)
+
+    def get_album_tracks(self, album_id: int) -> List[Track]:
+        """Returns all tracks in an album, ordered by track number."""
+        return self.db.get_tracks_by_album(album_id)
+
+    def get_playlist_tracks(self, playlist_id: int) -> List[Track]:
+        """Returns all tracks in a playlist in order."""
+        return self.db.get_tracks_by_playlist(playlist_id)
+
+    def get_track_artists(self, track_id: int) -> List[Artist]:
+        """Returns all artists associated with a specific track."""
+        return self.db.get_artists_by_track(track_id)
+
+    def search(self, query: str) -> List[BaseModel]:
+        """Search the library for tracks matching the query."""
+        return self.db.search_library(query)
     
-    def update_playlist(self, playlist_id: int, name: Optional[str] = None, tracks: Optional[list] = None) -> Dict:
-        """
-        Update playlist name and/or track list
-        
-        Args:
-            playlist_id: ID of playlist to update
-            name: New name for playlist (optional)
-            tracks: New track list (optional) - will replace existing tracks
-        
-        Returns:
-            Dict with success status
-        """
-        try:
-            url = f"{self.base_url}/s/JSON/playlists"
-            headers = {'Authorization': f'Bearer {self.access_token}', 'Content-Type': 'application/json'}
-            
-            data = {
-                'mode': 'updateplaylist',
-                'playlist_id': playlist_id
-            }
-            
-            if name is not None:
-                data['name'] = name
-            
-            if tracks is not None:
-                data['tracks'] = tracks
-            
-            response = self.session.post(url, json=data, headers=headers)
-            
-            if response.status_code == 200:
-                # Reload library to reflect changes
-                self.load_library()
-                return {'success': True}
-            else:
-                result = response.json()
-                return {'success': False, 'message': result.get('message', 'Failed to update playlist')}
-        except Exception as e:
-            return {'success': False, 'message': str(e)}
+    def get_track_details(self, track_id: int) -> Optional[Track]:
+        """Fetch a single track's metadata."""
+        return self.db.get_track_by_id(track_id)
     
-    def append_to_playlist(self, playlist_id: int, tracks: list) -> Dict:
-        """
-        Add tracks to existing playlist
+    def get_album_by_track(self, track_id: int) -> Optional[Album]:
+        """Fetch the album for a given track."""
+        return self.db.get_album_by_track(track_id)
         
-        Args:
-            playlist_id: ID of playlist
-            tracks: List of track IDs to add
-        
-        Returns:
-            Dict with success status
-        """
-        try:
-            url = f"{self.base_url}/s/JSON/playlists"
-            headers = {'Authorization': f'Bearer {self.access_token}', 'Content-Type': 'application/json'}
-            
-            data = {
-                'mode': 'appendplaylist',
-                'playlist_id': playlist_id,
-                'tracks': tracks
-            }
-            
-            response = self.session.post(url, json=data, headers=headers)
-            
-            if response.status_code == 200:
-                self.load_library()
-                return {'success': True}
-            else:
-                result = response.json()
-                return {'success': False, 'message': result.get('message', 'Failed to append to playlist')}
-        except Exception as e:
-            return {'success': False, 'message': str(e)}
+    def get_artist_by_id(self, artist_id: int) -> Optional[Artist]:
+        """Fetch a single artist by ID."""
+        return self.db.get_artist_by_id(artist_id)
     
-    def reorder_playlist(self, playlist_id: int, tracks: list) -> Dict:
-        """
-        Reorder tracks in a playlist
-        
-        Args:
-            playlist_id: ID of playlist
-            tracks: List of track IDs in new order
-        
-        Returns:
-            Dict with success status
-        """
-        try:
-            url = f"{self.base_url}/s/JSON/playlists"
-            headers = {'Authorization': f'Bearer {self.access_token}', 'Content-Type': 'application/json'}
-            
-            data = {
-                'mode': 'playlistorder',
-                'playlist_id': playlist_id,
-                'tracks': tracks
-            }
-            
-            response = self.session.post(url, json=data, headers=headers)
-            
-            if response.status_code == 200:
-                self.load_library()
-                return {'success': True}
-            else:
-                result = response.json()
-                return {'success': False, 'message': result.get('message', 'Failed to reorder playlist')}
-        except Exception as e:
-            return {'success': False, 'message': str(e)}
+    def get_albums(self) -> List[Album]:
+        """Returns all albums sorted by artist name and year."""
+        return self.db.get_all_albums()
     
-    def delete_playlist(self, playlist_id: int) -> Dict:
-        """
-        Delete a playlist
-        
-        Args:
-            playlist_id: ID of playlist to delete
-        
-        Returns:
-            Dict with success status
-        """
-        try:
-            url = f"{self.base_url}/s/JSON/playlists"
-            headers = {'Authorization': f'Bearer {self.access_token}', 'Content-Type': 'application/json'}
-            
-            data = {
-                'mode': 'deleteplaylist',
-                'playlist_id': playlist_id
-            }
-            
-            response = self.session.post(url, json=data, headers=headers)
-            
-            if response.status_code == 200:
-                self.load_library()
-                return {'success': True}
-            else:
-                result = response.json()
-                return {'success': False, 'message': result.get('message', 'Failed to delete playlist')}
-        except Exception as e:
-            return {'success': False, 'message': str(e)}
+    def get_album_by_id(self, album_id: int) -> Optional[Album]:
+        """Fetch a single album by ID."""
+        return self.db.get_album_by_id(album_id)
     
-    def make_playlist_public(self, playlist_id: int) -> Dict:
-        """
-        Make a playlist public
-        
-        Args:
-            playlist_id: ID of playlist
-        
-        Returns:
-            Dict with success status and public_id
-        """
-        try:
-            url = f"{self.base_url}/s/JSON/playlists"
-            headers = {'Authorization': f'Bearer {self.access_token}', 'Content-Type': 'application/json'}
-            
-            data = {
-                'mode': 'makeplaylistpublic',
-                'playlist_id': playlist_id
-            }
-            
-            response = self.session.post(url, json=data, headers=headers)
-            result = response.json()
-            
-            if response.status_code == 200:
-                self.load_library()
-                return {'success': True, 'public_id': result.get('public_id')}
-            else:
-                return {'success': False, 'message': result.get('message', 'Failed to make playlist public')}
-        except Exception as e:
-            return {'success': False, 'message': str(e)}
+    def get_artists_by_album(self, album_id: int) -> List[Artist]:
+        """Get all artists associated with a specific album."""
+        return self.db.get_artists_by_album(album_id)
     
-    def revoke_playlist_public(self, playlist_id: int) -> Dict:
-        """
-        Make a public playlist private
-        
-        Args:
-            playlist_id: ID of playlist
-        
-        Returns:
-            Dict with success status
-        """
-        try:
-            url = f"{self.base_url}/s/JSON/playlists"
-            headers = {'Authorization': f'Bearer {self.access_token}', 'Content-Type': 'application/json'}
-            
-            data = {
-                'mode': 'revokeplaylistpublic',
-                'playlist_id': playlist_id
-            }
-            
-            response = self.session.post(url, json=data, headers=headers)
-            
-            if response.status_code == 200:
-                self.load_library()
-                return {'success': True}
-            else:
-                result = response.json()
-                return {'success': False, 'message': result.get('message', 'Failed to revoke playlist public')}
-        except Exception as e:
-            return {'success': False, 'message': str(e)}
+    def get_tracks_by_album(self, album_id: int) -> List[Track]:
+        """Get all tracks for a specific album."""
+        return self.db.get_tracks_by_album(album_id)
+    
+    def get_playlist_by_id(self, playlist_id: int) -> Optional[Playlist]:
+        """Fetch a single playlist by ID."""
+        return self.db.get_playlist_by_id(playlist_id)
+    
+    def get_playlists(self) -> List[Playlist]:
+        """Returns all playlists sorted by name."""
+        return self.db.get_all_playlists()
+    
+    def get_track_by_id(self, track_id: int) -> Optional[Track]:
+        """Fetch a single track by ID."""
+        return self.db.get_track_by_id(track_id)
+    
+    def get_artists_by_track(self, track_id: int) -> List[Artist]:
+        """Get all artists associated with a specific track."""
+        return self.db.get_artists_by_track(track_id)
+    
+    def get_artists_with_albums(self) -> List[Artist]:
+        """Get all artists that have albums."""
+        return self.db.get_artists_with_albums()
+    
+    def get_tracks_by_artist(self, artist_id: int) -> List[Track]:
+        """Get all tracks associated with a specific artist."""
+        return self.db.get_tracks_by_artist(artist_id)
