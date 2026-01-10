@@ -142,7 +142,10 @@ class iBroadcastAPI:
                             if track_data and track_data.get('artwork_id'):
                                 al['artwork_id'] = track_data['artwork_id']
                                 break
-
+                
+                # Remove "Recently Played" and "Most Recently Uploaded" playlists
+                processed_lib['playlists'] = {k: v for k, v in processed_lib['playlists'].items() if v.get('name') not in ['Recently Played', 'Most Recent Uploads']}
+                
                 # Save to DB
                 self.db.sync_library(processed_lib)
                 self.save_token()

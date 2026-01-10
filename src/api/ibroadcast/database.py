@@ -124,7 +124,13 @@ class DatabaseManager:
 
     def get_all_albums(self) -> List[Album]:
         result = []
-        for r in self.conn.execute("SELECT * FROM Albums ORDER BY name").fetchall():
+        query = '''
+            SELECT al.* FROM Albums al
+            LEFT JOIN Album_Artists aa ON al.album_id = aa.album_id
+            LEFT JOIN Artists a ON aa.artist_id = a.artist_id
+            ORDER BY a.name COLLATE NOCASE, al.year
+        '''
+        for r in self.conn.execute(query).fetchall():
             d = dict(r)
             result.append(Album(d['album_id'], d['name'], d['rating'], d['disc'], d['year']))
         return result
@@ -229,7 +235,7 @@ class DatabaseManager:
 
     def get_albums_by_artist(self, artist_id: int) -> List[Album]:
         result = []
-        for r in self.conn.execute("SELECT al.* FROM Albums al JOIN Album_Artists aa ON al.album_id = aa.album_id WHERE aa.artist_id = ?", (artist_id,)).fetchall():
+        for r in self.conn.execute("SELECT al.* FROM Albums al JOIN Album_Artists aa ON al.album_id = aa.album_id WHERE aa.artist_id = ? ORDER BY al.year", (artist_id,)).fetchall():
             d = dict(r)
             result.append(Album(d['album_id'], d['name'], d['rating'], d['disc'], d['year']))
         return result

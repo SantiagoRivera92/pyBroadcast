@@ -1,11 +1,9 @@
+import base64
+import os
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebChannel import QWebChannel
-from PyQt6.QtWidgets import QBoxLayout
 from PyQt6.QtCore import Qt, pyqtSlot, QObject
-
-from typing import Optional
-
-from src.api.ibroadcast.models import Artist
+from PyQt6.QtGui import QFontDatabase, QTextDocument
 
 class LinkHandler(QObject):
     """Handler for link clicks from JavaScript"""
@@ -25,199 +23,149 @@ class ScrollingArtistsLabel(QWebEngineView):
         self.full_text = ""
         self.needs_scroll = False
         self.gap = 50
-        self.artist_layout: Optional[QBoxLayout] = None
-        self.artists: list[Artist] = []
         self.onArtistClickedCallback = callback
-        if callback:
-            self.setCursor(Qt.CursorShape.PointingHandCursor)
-            self.link_handler = LinkHandler(callback)
-        else:
-            self.setCursor(Qt.CursorShape.ArrowCursor)
-        # Set up web channel for communication between JS and Python
+        self.artists = []
+        self.font_family = "NataSans"
+        self.font_base64 = ""
+        
+        # 1. Load font into Python and prepare Base64 for WebEngine
+        font_path = "assets/font/NataSans.ttf"
+        if os.path.exists(font_path):
+            # Load for PyQt6 measurement
+            font_id = QFontDatabase.addApplicationFont(font_path)
+            if font_id != -1:
+                families = QFontDatabase.applicationFontFamilies(font_id)
+                if families:
+                    self.font_family = families[0]
+            
+            # Convert to Base64 for CSS
+            with open(font_path, "rb") as f:
+                self.font_base64 = base64.b64encode(f.read()).decode("utf-8")
+        
+        # Set up web channel
         self.channel = QWebChannel()
+        self.link_handler = LinkHandler(self.onArtistClickedCallback)
         self.channel.registerObject("handler", self.link_handler)
         page = self.page()
         if page:
             page.setWebChannel(self.channel)
             page.setBackgroundColor(Qt.GlobalColor.transparent)
         
-        # Make background transparent
         self.setStyleSheet("background: transparent;")
+        
+    def get_common_css(self):
+        """Returns the shared CSS including the @font-face"""
+        font_face = ""
+        if self.font_base64:
+            font_face = f'''
+            @font-face {{
+                font-family: '{self.font_family}';
+                src: url(data:font/ttf;base64,{self.font_base64});
+            }}
+            '''
+        
+        return f'''
+            {font_face}
+            body {{
+                margin: 0;
+                padding: 0;
+                font-family: '{self.font_family}', sans-serif;
+                overflow: hidden;
+                background: transparent;
+                color: white;
+                font-size: 13px; /* Adjust to match your UI */
+            }}
+            a {{
+                color: #ffffff;
+                text-decoration: none;
+                cursor: pointer;
+            }}
+            a:hover {{
+                text-decoration: underline;
+            }}
+        '''
 
-            
-    def setArtists(self, artists: list[Artist]):
-        """Set multiple artists as clickable links with CSS scrolling"""
+    def setArtists(self, artists):
         if not artists:
             self.setHtml("")
-            self.needs_scroll = False
             return
         
         self.artists = artists
-        
-        # Build artist links
-        links = []
-        for artist in artists:
-            # Use data attribute instead of href to avoid navigation
-            link = f'<a href="#" data-artist-id="{artist.id}">{artist.name}</a>'
-            links.append(link)
+        links = [f'<a href="#" data-artist-id="{a.id}">{a.name}</a>' for a in artists]
         artist_text = ", ".join(links)
         
-        # Check if we need scrolling
         self.check_if_text_needs_scroll(artist_text)
         
+        # Animation logic
+        animation_css = ""
+        container_class = ""
         if self.needs_scroll:
-            # Use CSS animation for scrolling
-            html = f'''
-            <!DOCTYPE html>
-            <html>
-            <head>
-            <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
-            <style>
-                body {{
-                    margin: 0;
-                    padding: 0;
-                    font-family: inherit;
-                    overflow: hidden;
-                    background: transparent;
-                    color: white;
-                }}
-                .container {{
-                    white-space: nowrap;
-                    display: inline-block;
-                }}
+            container_class = "scroll-container"
+            animation_css = f'''
+                .container {{ white-space: nowrap; display: inline-block; }}
                 .scroll-container {{
                     display: inline-block;
                     animation: scroll 15s ease-in-out infinite;
                 }}
-                .scroll-container:hover {{
-                    animation-play-state: paused;
-                }}
+                .scroll-container:hover {{ animation-play-state: paused; }}
                 @keyframes scroll {{
-                    0%, 10% {{ 
-                        transform: translateX(0); 
-                    }}
-                    45%, 55% {{ 
-                        transform: translateX(calc(-100% + {self.width() - 20}px)); 
-                    }}
-                    90%, 100% {{ 
-                        transform: translateX(0); 
-                    }}
+                    0%, 10% {{ transform: translateX(0); }}
+                    45%, 55% {{ transform: translateX(calc(-100% + {self.width() - 10}px)); }}
+                    90%, 100% {{ transform: translateX(0); }}
                 }}
-                a {{
-                    color: #ffffff;
-                    text-decoration: none;
-                    cursor: pointer;
-                }}
-                a:visited {{
-                    color: #ffffff;
-                }}
-                a:hover {{
-                    text-decoration: underline;
-                    color: #ffffff;
-                }}
-            </style>
-            </head>
-            <body>
-                <div class="container">
-                    <div class="scroll-container">{artist_text}</div>
-                </div>
-                <script>
-                    new QWebChannel(qt.webChannelTransport, function(channel) {{
-                        var handler = channel.objects.handler;
-                        
-                        document.addEventListener('click', function(e) {{
-                            if (e.target.tagName === 'A') {{
-                                e.preventDefault();
-                                var artistId = e.target.getAttribute('data-artist-id');
-                                if (artistId && handler) {{
-                                    console.log('Clicked artist:', artistId);
-                                    handler.handleClick(artistId);
-                                }}
-                            }}
-                        }});
-                    }});
-                </script>
-            </body>
-            </html>
             '''
-        else:
-            # No scrolling needed, just display normally
-            html = f'''
-            <!DOCTYPE html>
-            <html>
-            <head>
+
+        html = f'''
+        <!DOCTYPE html>
+        <html>
+        <head>
             <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
             <style>
-                body {{
-                    margin: 0;
-                    padding: 0;
-                    font-family: inherit;
-                    background: transparent;
-                    color: white;
-                }}
-                a {{
-                    color: #ffffff;
-                    text-decoration: none;
-                    cursor: pointer;
-                }}
-                a:visited {{
-                    color: #ffffff;
-                }}
-                a:hover {{
-                    text-decoration: underline;
-                    color: #ffffff;
-                }}
+                {self.get_common_css()}
+                {animation_css}
             </style>
-            </head>
-            <body>{artist_text}
-                <script>
-                    new QWebChannel(qt.webChannelTransport, function(channel) {{
-                        var handler = channel.objects.handler;
-                        
-                        document.addEventListener('click', function(e) {{
-                            if (e.target.tagName === 'A') {{
-                                e.preventDefault();
-                                var artistId = e.target.getAttribute('data-artist-id');
-                                if (artistId && handler) {{
-                                    console.log('Clicked artist:', artistId);
-                                    handler.handleClick(artistId);
-                                }}
-                            }}
-                        }});
-                    }});
-                </script>
-            </body>
-            </html>
-            '''
-        
+        </head>
+        <body>
+            <div class="container">
+                <div class="{container_class}">{artist_text}</div>
+            </div>
+            <script>
+                new QWebChannel(qt.webChannelTransport, function(channel) {{
+                    window.handler = channel.objects.handler;
+                }});
+                
+                document.addEventListener('click', function(e) {{
+                    if (e.target.tagName === 'A') {{
+                        e.preventDefault();
+                        var id = e.target.getAttribute('data-artist-id');
+                        if (id && window.handler) window.handler.handleClick(id);
+                    }}
+                }});
+            </script>
+        </body>
+        </html>
+        '''
         self.setHtml(html)
 
-    def setGap(self, gap):
-        self.gap = gap
-        
-    def setText(self, text):
-        """For backwards compatibility"""
-        self.full_text = text
-        self.setHtml(text)
-        
     def check_if_text_needs_scroll(self, text):
-        """Check if text is too long and needs scrolling"""
         if not text:
             self.needs_scroll = False
             return
         
-        # Strip HTML tags to measure actual text width
-        from PyQt6.QtGui import QTextDocument
         doc = QTextDocument()
+        # Use the same font family and size as the CSS for measurement
+        font = self.font()
+        font.setFamily(self.font_family)
+        doc.setDefaultFont(font)
         doc.setHtml(text)
-        doc.setDefaultFont(self.font())
         
-        text_width = doc.idealWidth()
-        available_width = self.width() - 20  # Account for padding
-        self.needs_scroll = text_width > available_width
-    
+        self.needs_scroll = doc.idealWidth() > (self.width() - 20)
+
+    def setOnArtistClickedCallback(self, callback):
+        self.link_handler.callback = callback
+        self.setCursor(Qt.CursorShape.PointingHandCursor if callback else Qt.CursorShape.ArrowCursor)
+
     def resizeEvent(self, a0):
-        """Recheck if scrolling is needed when widget is resized"""
         super().resizeEvent(a0)
         if self.artists:
             self.setArtists(self.artists)
