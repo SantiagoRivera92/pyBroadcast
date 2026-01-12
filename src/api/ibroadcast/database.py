@@ -26,6 +26,9 @@ class DatabaseManager:
 
     def clear_database(self):
         with self.conn:
+            self.conn.execute("DELETE FROM Track_Artists")
+            self.conn.execute("DELETE FROM Album_Artists")
+            self.conn.execute("DELETE FROM Playlist_Tracks")
             self.conn.execute("DELETE FROM Tracks")
             self.conn.execute("DELETE FROM Artists")
             self.conn.execute("DELETE FROM Albums")
