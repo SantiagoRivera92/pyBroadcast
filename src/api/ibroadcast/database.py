@@ -93,7 +93,7 @@ class DatabaseManager:
 
     def insert_album(self, al: Album):
         with self.conn:
-            self.conn.execute("INSERT OR REPLACE INTO Albums VALUES (?, ?, ?, ?, ?, ?)", (al.id, al.name, al.rating, al.disc, al.year))
+            self.conn.execute("INSERT OR REPLACE INTO Albums VALUES (?, ?, ?, ?, ?)", (al.id, al.name, al.rating, al.disc, al.year))
 
     def insert_track(self, t: Track):
         with self.conn:
@@ -211,16 +211,74 @@ class DatabaseManager:
         return result
 
     def get_artists_with_albums(self) -> List[Artist]:
-        result = []
-        for r in self.conn.execute("""
-            SELECT DISTINCT a.* FROM Artists a
-            JOIN Album_Artists aa ON a.artist_id = aa.artist_id
-            JOIN Albums al ON aa.album_id = al.album_id
-            ORDER BY a.name COLLATE NOCASE
-        """).fetchall():
-            d = dict(r)
-            result.append(Artist(d['artist_id'], d['name'], d['rating'], d['artwork_id']))
-        return result
+        """
+        Get all artists that have albums, filtering out 'minor' artists.
+        A 'minor' artist is one who:
+        1. Has NO solo albums (albums where they are the only artist).
+        2. On ALL their albums, they are accompanied by at least one 'major' artist (an artist with at least one solo album).
+        """
+        with self.conn:
+            # 1. Identify "Solo Albums" and "Major Artists"
+            # Solo Album: An album with exactly 1 entry in Album_Artists
+            major_artist_ids = set([
+                row[0] for row in self.conn.execute("""
+                    SELECT aa.artist_id
+                    FROM Album_Artists aa
+                    JOIN (
+                        SELECT album_id
+                        FROM Album_Artists
+                        GROUP BY album_id
+                        HAVING COUNT(artist_id) = 1
+                    ) solo_albums ON aa.album_id = solo_albums.album_id
+                """).fetchall()
+            ])
+
+            # 2. Get all artists with albums
+            all_artists_with_albums_rows = self.conn.execute("""
+                SELECT DISTINCT a.* 
+                FROM Artists a
+                JOIN Album_Artists aa ON a.artist_id = aa.artist_id
+                JOIN Albums al ON aa.album_id = al.album_id
+                ORDER BY a.name COLLATE NOCASE
+            """).fetchall()
+            
+            all_artists = [Artist(dict(r)['artist_id'], dict(r)['name'], dict(r)['rating'], dict(r)['artwork_id']) for r in all_artists_with_albums_rows]
+            
+            # 3. Filter
+            final_artists = []
+            for artist in all_artists:
+                if artist.id in major_artist_ids:
+                    final_artists.append(artist)
+                    continue
+                
+                artist_albums = self.get_albums_by_artist(artist.id)
+                
+                keep_artist = False
+                for album in artist_albums:
+                    album_artists = self.get_artists_by_album(album.id)
+                                        
+                    all_others_are_major = True
+                    has_others = False
+                    for other in album_artists:
+                        if other.id == artist.id:
+                            continue
+                        has_others = True
+                        if other.id not in major_artist_ids:
+                            all_others_are_major = False
+                            break
+                    
+                    if not has_others:
+                        keep_artist = True
+                        break
+
+                    if not all_others_are_major:
+                        keep_artist = True
+                        break
+                
+                if keep_artist:
+                    final_artists.append(artist)
+
+            return final_artists
     
     def get_artists_by_track(self, track_id: int) -> List[Artist]:
         result = []

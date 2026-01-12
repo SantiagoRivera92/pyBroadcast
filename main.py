@@ -116,7 +116,7 @@ class iBroadcastNative(QMainWindow):
                 
     def init_ui(self):
         self.setWindowTitle("pyBroadcast")
-        self.resize(1400, 900)
+        self.showMaximized()
         
         # Add menu bar - NEW
         self.create_menu_bar()

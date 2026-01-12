@@ -1,5 +1,7 @@
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLineEdit
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLineEdit, QLabel
+from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtGui import QPixmap
+from src.core.resource_path import resource_path
 
 class SearchHeader(QFrame):
     searchTextChanged = pyqtSignal(str)
@@ -26,6 +28,14 @@ class SearchHeader(QFrame):
         
         layout.addWidget(self.search_input)
         layout.addStretch()
+        
+        # Powered by Logo
+        self.logo_label = QLabel()
+        pixmap = QPixmap(resource_path("assets/powered.svg"))
+        if not pixmap.isNull():
+             pixmap = pixmap.scaledToHeight(40, Qt.TransformationMode.SmoothTransformation)
+             self.logo_label.setPixmap(pixmap)
+        layout.addWidget(self.logo_label)
     
     def clear(self):
         self.search_input.clear()
