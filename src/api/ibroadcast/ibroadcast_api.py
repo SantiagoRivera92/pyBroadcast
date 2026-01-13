@@ -419,3 +419,54 @@ class iBroadcastAPI:
             return None
         except Exception as e:
             return None
+
+    def report_history(self, track_id: int, timestamp: str) -> bool:
+        """Report play history to iBroadcast.
+        
+        Args:
+            track_id: The ID of the track that was played
+            timestamp: ISO format timestamp when the play event occurred (YYYY-MM-DD HH:MM:SS)
+        
+        Returns:
+            True if history was successfully reported, False otherwise
+        """
+        print("Reporting history for track_id: {}, timestamp: {}".format(track_id, timestamp))
+        url = f"{self.base_url}/s/JSON/status"
+        headers = {
+            'Authorization': f'Bearer {self.access_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Extract date from timestamp
+        day = timestamp.split(' ')[0]
+        
+        # Format history according to iBroadcast API spec
+        history = [
+            {
+                "day": day,
+                "plays": {
+                    str(track_id): 1
+                },
+                "detail": {
+                    str(track_id): [
+                        {
+                            "event": "play",
+                            "ts": timestamp
+                        }
+                    ]
+                }
+            }
+        ]
+        
+        payload = {
+            "mode": "status",
+            "history": history
+        }
+        
+        try:
+            response = self.session.post(url, json=payload, headers=headers)
+            data = response.json()
+            return data.get('result', False)
+        except Exception as e:
+            print(f"Error reporting history: {e}")
+            return False

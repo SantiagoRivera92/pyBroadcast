@@ -52,6 +52,7 @@ class iBroadcastNative(QMainWindow):
         
         self.track_duration = 0
         self.current_track_info = {}
+        self.current_track_start_time = None
         
         self.init_navigation_stack()
         self.init_ui()
@@ -896,6 +897,10 @@ class iBroadcastNative(QMainWindow):
                 self.media_player.pause()
             
             self.current_track_id = track_id
+            
+            # Track start time for history reporting (use UTC for iBroadcast)
+            from datetime import datetime
+            self.current_track_start_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
                         
             # Store track info
             self.current_track_info = {
@@ -1105,8 +1110,10 @@ class iBroadcastNative(QMainWindow):
                 self.pending_seek_ms = 0
 
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
+            # Report play history before moving to next track
+            if self.current_track_id and self.current_track_start_time:
+                self.api.report_history(self.current_track_id, self.current_track_start_time)
             self.play_next()
-    
     
     def update_queue_display(self):
         """Update the queue sidebar display from tracks/play_next state"""
