@@ -59,3 +59,20 @@ def test_load_library_auth_fail(api):
             result = api.load_library()
             assert result['success'] is False
             assert result['message'] == 'Auth expired'
+
+def test_get_play_queue_token(api):
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        'result': True,
+        'token': 'test_token_123'
+    }
+    api.session.post.return_value = mock_response
+    
+    token = api.get_play_queue_token()
+    
+    assert token == 'test_token_123'
+    # Verify call arguments
+    args, kwargs = api.session.post.call_args
+    assert args[0] == "https://library.ibroadcast.com/s/JSON/status"
+    assert kwargs['json'] == {'mode': 'playqueue_token'}

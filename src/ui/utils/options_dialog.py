@@ -1,12 +1,11 @@
 """
-Updated options dialog with tabbed interface for API credentials and Last.fm settings.
+Updated options dialog with tabbed interface for API credentials.
 """
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
                              QLineEdit, QPushButton, QGroupBox, QMessageBox,
                              QTabWidget, QWidget)
 
 from src.api.ibroadcast.ibroadcast_api import iBroadcastAPI
-from src.api.lastfm.lastfm_api import LastFMAPI
 from src.core.credentials_manager import CredentialsManager
 
 
@@ -81,58 +80,6 @@ class APICredentialsTab(QWidget):
         ibroadcast_group.setLayout(ibroadcast_layout)
         layout.addWidget(ibroadcast_group)
         
-        # Last.fm API section
-        lastfm_group = QGroupBox("Last.fm API Credentials")
-        lastfm_layout = QVBoxLayout()
-        
-        # Status
-        self.lastfm_api_status = QLabel()
-        self.update_lastfm_api_status()
-        lastfm_layout.addWidget(self.lastfm_api_status)
-        
-        # API Key
-        api_key_layout = QHBoxLayout()
-        api_key_layout.addWidget(QLabel("API Key:"))
-        self.lastfm_api_key_input = QLineEdit()
-        self.lastfm_api_key_input.setPlaceholderText("Last.fm API Key")
-        api_key_layout.addWidget(self.lastfm_api_key_input)
-        lastfm_layout.addLayout(api_key_layout)
-        
-        # API Secret
-        api_secret_layout = QHBoxLayout()
-        api_secret_layout.addWidget(QLabel("Shared Secret:"))
-        self.lastfm_api_secret_input = QLineEdit()
-        self.lastfm_api_secret_input.setPlaceholderText("Last.fm Shared Secret")
-        self.lastfm_api_secret_input.setEchoMode(QLineEdit.EchoMode.Password)
-        api_secret_layout.addWidget(self.lastfm_api_secret_input)
-        lastfm_layout.addLayout(api_secret_layout)
-        
-        # Buttons
-        lastfm_btn_layout = QHBoxLayout()
-        self.save_lastfm_api_btn = QPushButton("Save Credentials")
-        self.save_lastfm_api_btn.clicked.connect(self.save_lastfm_api_credentials)
-        lastfm_btn_layout.addWidget(self.save_lastfm_api_btn)
-        
-        self.clear_lastfm_api_btn = QPushButton("Clear Credentials")
-        self.clear_lastfm_api_btn.clicked.connect(self.clear_lastfm_api_credentials)
-        lastfm_btn_layout.addWidget(self.clear_lastfm_api_btn)
-        lastfm_btn_layout.addStretch()
-        lastfm_layout.addLayout(lastfm_btn_layout)
-        
-        # Info
-        lastfm_info = QLabel(
-            "To get your Last.fm API credentials:\n"
-            "Visit https://www.last.fm/api/account/create\n"
-            "Create an application and obtain your API Key and Shared Secret.\n\n"
-            "You don't need a Last.fm account to use this application"
-        )
-        lastfm_info.setWordWrap(True)
-        lastfm_info.setStyleSheet("color: #666; font-size: 11px; margin-top: 10px;")
-        lastfm_layout.addWidget(lastfm_info)
-        
-        lastfm_group.setLayout(lastfm_layout)
-        layout.addWidget(lastfm_group)
-        
         layout.addStretch()
     
     def toggle_secret_visibility(self, checked):
@@ -152,15 +99,6 @@ class APICredentialsTab(QWidget):
         else:
             self.ibroadcast_status.setText("⚠ No credentials configured")
             self.ibroadcast_status.setStyleSheet("color: orange; font-weight: bold;")
-    
-    def update_lastfm_api_status(self):
-        """Update Last.fm API status label"""
-        if CredentialsManager.has_lastfm_credentials():
-            self.lastfm_api_status.setText("✓ API credentials configured")
-            self.lastfm_api_status.setStyleSheet("color: green; font-weight: bold;")
-        else:
-            self.lastfm_api_status.setText("⚠ No API credentials configured")
-            self.lastfm_api_status.setStyleSheet("color: orange; font-weight: bold;")
     
     def save_ibroadcast_credentials(self):
         """Save iBroadcast credentials"""
@@ -204,176 +142,6 @@ class APICredentialsTab(QWidget):
                 self.update_ibroadcast_status()
             else:
                 QMessageBox.critical(self, "Error", "Failed to clear credentials")
-    
-    def save_lastfm_api_credentials(self):
-        """Save Last.fm API credentials"""
-        api_key = self.lastfm_api_key_input.text().strip()
-        api_secret = self.lastfm_api_secret_input.text().strip()
-        
-        if not api_key or not api_secret:
-            QMessageBox.warning(self, "Error", "Please enter both API Key and Shared Secret")
-            return
-        
-        success = CredentialsManager.set_credential(
-            CredentialsManager.LASTFM_API_KEY,
-            api_key
-        )
-        success = success and CredentialsManager.set_credential(
-            CredentialsManager.LASTFM_API_SECRET,
-            api_secret
-        )
-        
-        if success:
-            QMessageBox.information(self, "Success", "Last.fm API credentials saved successfully!")
-            self.lastfm_api_key_input.clear()
-            self.lastfm_api_secret_input.clear()
-            self.update_lastfm_api_status()
-        else:
-            QMessageBox.critical(self, "Error", "Failed to save credentials")
-    
-    def clear_lastfm_api_credentials(self):
-        """Clear Last.fm API credentials"""
-        reply = QMessageBox.question(
-            self,
-            "Clear Credentials",
-            "Are you sure you want to clear your Last.fm API credentials?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            if CredentialsManager.clear_lastfm_credentials():
-                QMessageBox.information(self, "Success", "Credentials cleared")
-                self.update_lastfm_api_status()
-            else:
-                QMessageBox.critical(self, "Error", "Failed to clear credentials")
-
-class LastFMAccountTab(QWidget):
-    """Tab for Last.fm account login"""
-    
-    def __init__(self, lastfm_api, parent=None):
-        super().__init__(parent)
-        self.lastfm_api = lastfm_api
-        self.init_ui()
-    
-    def init_ui(self):
-        """Initialize the UI"""
-        layout = QVBoxLayout(self)
-        
-        # Last.fm account section
-        account_group = QGroupBox("Last.fm Account")
-        account_layout = QVBoxLayout()
-        
-        # Status
-        self.status_label = QLabel()
-        self.update_status_label()
-        account_layout.addWidget(self.status_label)
-        
-        # Username
-        username_layout = QHBoxLayout()
-        username_layout.addWidget(QLabel("Username:"))
-        self.username_input = QLineEdit()
-        self.username_input.setPlaceholderText("Last.fm username")
-        username_layout.addWidget(self.username_input)
-        account_layout.addLayout(username_layout)
-        
-        # Password
-        password_layout = QHBoxLayout()
-        password_layout.addWidget(QLabel("Password:"))
-        self.password_input = QLineEdit()
-        self.password_input.setPlaceholderText("Last.fm password")
-        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
-        password_layout.addWidget(self.password_input)
-        account_layout.addLayout(password_layout)
-        
-        # Buttons
-        button_layout = QHBoxLayout()
-        self.login_btn = QPushButton("Login")
-        self.login_btn.clicked.connect(self.handle_login)
-        button_layout.addWidget(self.login_btn)
-        
-        self.logout_btn = QPushButton("Logout")
-        self.logout_btn.clicked.connect(self.handle_logout)
-        self.logout_btn.setEnabled(self.lastfm_api.is_authenticated())
-        button_layout.addWidget(self.logout_btn)
-        
-        button_layout.addStretch()
-        account_layout.addLayout(button_layout)
-        
-        # Info
-        info_label = QLabel(
-            "Note: You must configure Last.fm API credentials in the 'API Credentials' "
-            "tab before you can log in to your Last.fm account."
-        )
-        info_label.setWordWrap(True)
-        info_label.setStyleSheet("color: #666; font-size: 11px; margin-top: 10px;")
-        account_layout.addWidget(info_label)
-        
-        account_group.setLayout(account_layout)
-        layout.addWidget(account_group)
-        
-        layout.addStretch()
-    
-    def update_status_label(self):
-        """Update the status label"""
-        if self.lastfm_api.is_authenticated():
-            self.status_label.setText(f"✓ Logged in as: {self.lastfm_api.username}")
-            self.status_label.setStyleSheet("color: green; font-weight: bold;")
-        else:
-            self.status_label.setText("Not logged in to Last.fm")
-            self.status_label.setStyleSheet("color: #666;")
-    
-    def handle_login(self):
-        """Handle Last.fm login"""
-        if not CredentialsManager.has_lastfm_credentials():
-            QMessageBox.warning(
-                self,
-                "API Credentials Required",
-                "Please configure your Last.fm API credentials in the 'API Credentials' tab first."
-            )
-            return
-        
-        username = self.username_input.text().strip()
-        password = self.password_input.text().strip()
-        
-        if not username or not password:
-            QMessageBox.warning(self, "Error", "Please enter both username and password")
-            return
-        
-        self.login_btn.setEnabled(False)
-        self.login_btn.setText("Logging in...")
-        
-        result = self.lastfm_api.authenticate(username, password)
-        
-        if result['success']:
-            QMessageBox.information(self, "Success", "Successfully logged in to Last.fm!")
-            self.username_input.clear()
-            self.password_input.clear()
-            self.update_status_label()
-            self.logout_btn.setEnabled(True)
-        else:
-            QMessageBox.warning(self, "Error", f"Login failed: {result.get('message', 'Unknown error')}")
-        
-        self.login_btn.setEnabled(True)
-        self.login_btn.setText("Login")
-    
-    def handle_logout(self):
-        """Handle Last.fm logout"""
-        reply = QMessageBox.question(
-            self,
-            "Logout",
-            "Are you sure you want to logout from Last.fm?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            # Clear session but keep API credentials
-            CredentialsManager.delete_credential(CredentialsManager.LASTFM_SESSION_KEY)
-            CredentialsManager.delete_credential(CredentialsManager.LASTFM_USERNAME)
-            self.lastfm_api.session_key = None
-            self.lastfm_api.username = None
-            self.update_status_label()
-            self.logout_btn.setEnabled(False)
-            QMessageBox.information(self, "Success", "Successfully logged out from Last.fm")
 
 class IBroadcastTab(QWidget):
     """Tab for iBroadcast actions like reloading the library."""
@@ -425,9 +193,8 @@ class IBroadcastTab(QWidget):
 class OptionsDialog(QDialog):
     """Main options dialog with tabbed interface"""
     
-    def __init__(self, lastfm_api: LastFMAPI, ibroadcast_api: iBroadcastAPI, parent=None, on_close_callback=None):
+    def __init__(self, ibroadcast_api: iBroadcastAPI, parent=None, on_close_callback=None):
         super().__init__(parent)
-        self.lastfm_api = lastfm_api
         self.ibroadcast_api = ibroadcast_api
         self.on_close_callback = on_close_callback
         self.init_ui()
@@ -452,10 +219,6 @@ class OptionsDialog(QDialog):
         self.ibroadcast_tab = IBroadcastTab(self.ibroadcast_api)
         self.tabs.addTab(self.ibroadcast_tab, "Refresh Library")
         
-        # Last.fm Account tab
-        self.lastfm_tab = LastFMAccountTab(self.lastfm_api)
-        self.tabs.addTab(self.lastfm_tab, "Last.fm Account")
-
         layout.addWidget(self.tabs)
         
         # Close button

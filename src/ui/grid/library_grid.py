@@ -162,6 +162,7 @@ class LibraryGrid(QScrollArea):
                 font-weight: bold;
                 margin-top: 5px;
                 font-size: 18px;
+                background: transparent;
             }
         ''')
         t_label.setWordWrap(True)
@@ -176,6 +177,7 @@ class LibraryGrid(QScrollArea):
                 color: #b3b3b3;
                 font-size: 14px;
                 margin-left: 2px;
+                background: transparent;
             }
         ''')
         s_label.setWordWrap(True)
@@ -194,6 +196,7 @@ class LibraryGrid(QScrollArea):
                 color: #b3b3b3;
                 font-size: 14px;
                 margin-left: 2px;
+                background: transparent;
             }
         ''')
         ss_label.setWordWrap(True)

@@ -50,8 +50,6 @@ class ArtworkCache:
             
             return cache_path.as_uri()
         except Exception as e:
-            print(f"Failed to cache artwork {artwork_id}: {e}")
-            # Return original URL as fallback
             return artwork_url
     
     def clear_cache(self):
@@ -60,7 +58,7 @@ class ArtworkCache:
             try:
                 file.unlink()
             except Exception as e:
-                print(f"Failed to delete {file}: {e}")
+                pass
     
     def get_cache_size(self):
         """Get total size of cache in bytes"""

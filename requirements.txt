@@ -1,5 +1,5 @@
 keyring==25.7.0
+pydbus==0.6.0
 PyQt6==6.10.2
 pyqt6_sip==13.10.3
-pytest==9.0.2
 Requests==2.32.5

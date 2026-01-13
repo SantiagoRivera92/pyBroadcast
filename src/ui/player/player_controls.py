@@ -182,6 +182,7 @@ class PlayerControls(QFrame):
         self.time_current.setStyleSheet("background: transparent; color: #b3b3b3; font-size: 11px; min-width: 40px; border: none; padding: 0;")
         
         self.progress = QSlider(Qt.Orientation.Horizontal)
+        self.progress.setRange(0, 1000)
         self.progress.setStyleSheet("""
             QSlider::groove:horizontal { 
                 height: 4px; 
@@ -336,11 +337,11 @@ class PlayerControls(QFrame):
     
     def set_repeat(self, mode):
         self.repeat_mode = mode
-        if mode == "off":
+        if mode == "none":
             self.repeat_btn.svg_path = resource_path("assets/repeat_off.svg")
-        elif mode == "all":
+        elif mode == "queue":
             self.repeat_btn.svg_path = resource_path("assets/repeat_on.svg")
-        else:  # "one"
+        elif mode == "track":
             self.repeat_btn.svg_path = resource_path("assets/repeat_one.svg")
     
     def update_time_labels(self, current_seconds, total_seconds):

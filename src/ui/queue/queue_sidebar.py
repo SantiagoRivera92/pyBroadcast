@@ -25,14 +25,7 @@ class QueueItem(HoverableWidget):
         layout.setContentsMargins(8, 0, 8, 0)
         layout.setSpacing(12)
         layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        
-        # Subtle indicator for current track
-        if is_current:
-            indicator = QWidget()
-            indicator.setFixedSize(3, 32)
-            indicator.setStyleSheet("background-color: #5DADE2; border-radius: 1px;")
-            layout.addWidget(indicator, alignment=Qt.AlignmentFlag.AlignVCenter)
-        
+                
         # Text container
         text_container = QWidget(self)
         text_container.setStyleSheet("background: transparent;")
@@ -106,7 +99,7 @@ class QueueItem(HoverableWidget):
                     background: rgba(255, 255, 255, 0.12);
                 }
             """)
-            remove_btn.clicked.connect(lambda: self.removeRequested.emit(self.index - 1))
+            remove_btn.clicked.connect(lambda: self.removeRequested.emit(self.index))
             layout.addWidget(remove_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
         
         # Widget background styling
@@ -114,7 +107,10 @@ class QueueItem(HoverableWidget):
             QueueItem {{
                 background-color: {'rgba(93, 173, 226, 0.08)' if is_current else 'transparent'};
                 border-left: {'3px solid #5DADE2' if is_current else 'none'};
-                border-radius: 4px;
+                border-top-left-radius: 0px;
+                border-bottom-left-radius: 0px;
+                border-top-right-radius: 4px;
+                border-bottom-right-radius: 4px;
             }}
             QueueItem:hover {{
                 background-color: rgba(255, 255, 255, 0.08);
@@ -218,7 +214,7 @@ class QueueSidebar(QFrame):
     def _on_item_clicked(self, item):
         widget = self.queue_list.itemWidget(item)
         if isinstance(widget, QueueItem):
-            self.playTrackRequested.emit(widget.index - 1)
+            self.playTrackRequested.emit(widget.index)
     
     def _on_rows_moved(self, parent, start, end, destination, row):
         old_index = start

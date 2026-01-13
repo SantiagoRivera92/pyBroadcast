@@ -36,7 +36,6 @@ class CredentialsManager:
             keyring.set_password(cls.SERVICE_NAME, key, value)
             return True
         except Exception as e:
-            print(f"Error storing credential {key}: {e}")
             return False
     
     @classmethod
@@ -53,7 +52,6 @@ class CredentialsManager:
         try:
             return keyring.get_password(cls.SERVICE_NAME, key)
         except Exception as e:
-            print(f"Error retrieving credential {key}: {e}")
             return None
     
     @classmethod
@@ -71,7 +69,6 @@ class CredentialsManager:
             keyring.delete_password(cls.SERVICE_NAME, key)
             return True
         except Exception as e:
-            print(f"Error deleting credential {key}: {e}")
             return False
     
     @classmethod
@@ -138,8 +135,6 @@ class CredentialsManager:
                 cls.delete_credential(key)
                 results.append(True)
             except Exception as e:
-                # Ignore error if key does not exist or other issues
-                print(f"Error deleting credential {key}: {e}")
                 results.append(True)
         return all(results)
     

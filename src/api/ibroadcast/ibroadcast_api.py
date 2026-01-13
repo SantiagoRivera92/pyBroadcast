@@ -56,14 +56,14 @@ class iBroadcastAPI:
                     self.access_token = data.get('access_token')
                     self.refresh_token = data.get('refresh_token')
             except Exception as e:
-                print(f"Error loading cache: {e}")
+                pass
 
     def save_token(self):
         """Save current tokens to local file"""
         with open(TOKEN_FILE, 'w') as f:
             json.dump({
                 'access_token': self.access_token,
-                'refresh_token': self.refresh_token,
+                'refresh_token': self.refresh_token
             }, f)
 
     def logout(self):
@@ -115,8 +115,11 @@ class iBroadcastAPI:
             url = f"{self.library_url}/s/JSON/library"
             headers = {'Authorization': f'Bearer {self.access_token}', 'Content-Type': 'application/json'}
             response = self.session.post(url, json={'mode': 'library'}, headers=headers)
-            data = response.json()
-            
+            try:
+                data = response.json()
+            except ValueError:
+                return {'success': False, 'message': 'Invalid API response'}
+
             if not data.get('authenticated', True):
                 if self.refresh_access_token():
                     return self.load_library()
@@ -161,7 +164,6 @@ class iBroadcastAPI:
     
     def _precache_artworks(self):
         """Background task to pre-cache all artworks from DB references"""
-        print("Starting artwork pre-caching...")
         artwork_ids = self.db.get_all_artwork_ids()
         
         for artwork_id in artwork_ids:
@@ -169,7 +171,6 @@ class iBroadcastAPI:
                 artwork_url = f"https://artwork.ibroadcast.com/artwork/{artwork_id}"
                 self.artwork_cache.download_and_cache(artwork_url, artwork_id)
         
-        print(f"Artwork caching complete. Total cached: {self.artwork_cache.get_cache_count()}")
 
     def get_stream_url(self, track_id: int) -> str:
         """Get streaming URL by querying the database"""
@@ -185,7 +186,6 @@ class iBroadcastAPI:
             'platform': 'pyBroadcast',
             'version': '0.1'
         }
-        print(f"Generated stream URL for track {track_id}: {self.streaming_server}{track.file}?{urlencode(params)}")
         return f"{self.streaming_server}{track.file}?{urlencode(params)}"
 
     def get_artwork_url(self, artwork_id: Optional[int], use_cache: bool = True) -> str:
@@ -377,3 +377,45 @@ class iBroadcastAPI:
     def get_tracks_by_artist(self, artist_id: int) -> List[Track]:
         """Get all tracks associated with a specific artist."""
         return self.db.get_tracks_by_artist(artist_id)
+
+    def get_play_queue_token(self) -> Optional[dict]:
+        """Fetch a one-time token for the Play Queue WebSocket."""
+
+        url = f"{self.base_url}/s/JSON/status"
+        headers = {
+            'Authorization': f'Bearer {self.access_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        payload = {
+            "mode": "playqueue_token"
+        }
+        
+        try:
+            response = self.session.post(url, json=payload, headers=headers)
+            data = response.json()
+            
+            if data.get('result'):
+                user_data = data.get('user', {})
+                session_uuid = None
+                
+                # Try multiple possible locations for session_uuid
+                if isinstance(user_data, dict):
+                    session_uuid = user_data.get('session_uuid')
+                    if not session_uuid:
+                        session_obj = user_data.get('session')
+                        if isinstance(session_obj, dict):
+                            session_uuid = session_obj.get('session_uuid')
+                        elif isinstance(session_obj, str):
+                            session_uuid = session_obj
+                
+                result = {
+                    'token': data.get('token'),
+                    'session_uuid': session_uuid
+                }
+                
+                return result
+            
+            return None
+        except Exception as e:
+            return None
