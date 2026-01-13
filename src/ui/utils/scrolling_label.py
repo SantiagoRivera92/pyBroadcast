@@ -111,8 +111,9 @@ class ScrollingLabel(QLabel):
         painter = QPainter(self)
         painter.setPen(self.palette().color(self.foregroundRole()))
         painter.setFont(self.font())
+        fm = painter.fontMetrics()
         x = -self.scroll_offset
-        y = self.height() // 2 + painter.fontMetrics().ascent() // 2
+        y = (self.height() + fm.ascent() - fm.descent()) // 2
         painter.drawText(x, y, self.full_text)
         painter.end()
     

@@ -52,6 +52,7 @@ class ScrollingArtistsLabel(QWebEngineView):
             page.setBackgroundColor(Qt.GlobalColor.transparent)
         
         self.setStyleSheet("background: transparent;")
+        self.setMinimumHeight(20)
         
     def get_common_css(self):
         """Returns the shared CSS including the @font-face"""

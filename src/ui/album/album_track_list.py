@@ -1,5 +1,5 @@
-from PyQt6.QtWidgets import QFrame, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtWidgets import QFrame, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView, QSizePolicy
+from PyQt6.QtCore import Qt, pyqtSignal, QSize
 
 from src.api.ibroadcast.models import Track
 
@@ -61,6 +61,7 @@ class AlbumTrackList(QFrame):
         self.table.cellDoubleClicked.connect(self.on_row_double_clicked)
         
         layout.addWidget(self.table)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
         
         # Store track data for retrieval
         self.tracks_data : list[Track] = []
@@ -81,6 +82,15 @@ class AlbumTrackList(QFrame):
             self.table.setItem(i, 0, num_item)
             self.table.setItem(i, 1, title_item)
             self.table.setItem(i, 2, duration_item)
+            
+        # Adjust table height to fit all rows
+        self.update_table_height()
+
+    def update_table_height(self):
+        height = self.table.horizontalHeader().height()
+        for i in range(self.table.rowCount()):
+            height += self.table.rowHeight(i)
+        self.table.setFixedHeight(height + 2)
 
     def format_duration(self, seconds):
         m, s = divmod(int(seconds), 60)

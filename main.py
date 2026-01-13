@@ -353,8 +353,6 @@ class iBroadcastNative(QMainWindow):
         
         self.artist_header = ArtistHeader()
         self._showing_artist_albums = False
-        self.artist_header.setVisible(self._showing_artist_albums)
-        content_layout.addWidget(self.artist_header)
         
         self.content_stack = QStackedWidget()
         self.artists_view = LibraryGrid(self.show_artist_albums, self.api)
@@ -624,6 +622,8 @@ class iBroadcastNative(QMainWindow):
         self.content_stack.setCurrentWidget(self.albums_view)
         self.artist_header.setVisible(self._showing_artist_albums)
         self.albums_view.clear()
+        if not artist_id:
+            self.albums_view.set_header(None)
         albums = None
         if artist_id:
             albums = self.api.get_artist_albums(artist_id)
@@ -752,6 +752,7 @@ class iBroadcastNative(QMainWindow):
         if artist:
             self.artist_header.set_artist(artist.name, self.api.get_artwork_url(artist.artwork_id))
             self._showing_artist_albums = True
+            self.albums_view.set_header(self.artist_header)
             self.content_stack.setCurrentWidget(self.albums_view)
             self.load_albums(artist_id)
         else:

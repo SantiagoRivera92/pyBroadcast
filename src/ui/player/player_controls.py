@@ -108,7 +108,10 @@ class PlayerControls(QFrame):
         layout.setContentsMargins(15, 10, 15, 10)
         
         # Left: Track Info
-        left_layout = QHBoxLayout()
+        self.left_widget = QWidget()
+        self.left_widget.setFixedWidth(350)
+        left_layout = QHBoxLayout(self.left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
         
         self.artwork = QLabel()
         self.artwork.setFixedSize(70, 70)
@@ -116,28 +119,29 @@ class PlayerControls(QFrame):
         self.artwork.setScaledContents(True)
         left_layout.addWidget(self.artwork)
         
-        info_widget = QFrame(self)
+        info_widget = QFrame(self.left_widget)
         info_layout = QVBoxLayout(info_widget)
+        info_layout.setContentsMargins(0, 0, 0, 0)
         info_layout.setSpacing(2)
         self.track_name = ScrollingLabel(info_widget)
         self.track_name.setText("No track playing")
         self.track_name.setStyleSheet("background: transparent; color: white; font-weight: bold; font-size: 15px; border: none; padding: 0;")
-        self.track_name.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        self.track_name.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.album_name = ScrollingLabel(info_widget)
         self.album_name.setText("")
         self.album_name.setStyleSheet("background: transparent; color: #b3b3b3; font-size: 13px; border: none; padding: 0; text-decoration: underline;")
-        self.album_name.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        self.album_name.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.album_name.onClickCallback = self._on_album_clicked
         self.artist_name = ScrollingArtistsLabel(info_widget, self._on_artist_clicked)
-        self.artist_name.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        self.artist_name.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.artist_name.setFixedHeight(25)
         info_layout.addWidget(self.track_name)
         info_layout.addWidget(self.album_name)
         info_layout.addWidget(self.artist_name)
         info_layout.addStretch()
-        info_widget.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        info_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._info_widget = info_widget  # Store reference for resizeEvent
         left_layout.addWidget(info_widget)
-        left_layout.addStretch()
         
         # Center: Controls
         controls_layout = QVBoxLayout()
@@ -213,7 +217,10 @@ class PlayerControls(QFrame):
         controls_layout.addLayout(progress_layout)
         
         # Right: Volume
-        volume_layout = QHBoxLayout()
+        self.right_widget = QWidget()
+        self.right_widget.setFixedWidth(200)
+        volume_layout = QHBoxLayout(self.right_widget)
+        volume_layout.setContentsMargins(0, 0, 0, 0)
         volume_layout.setSpacing(10)
         
         self.volume_icon = SvgButton(resource_path("assets/volume_up.svg"), 20)
@@ -222,7 +229,7 @@ class PlayerControls(QFrame):
         self.volume_slider = QSlider(Qt.Orientation.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(80)
-        # Width will be set dynamically in resizeEvent
+        self.volume_slider.setFixedWidth(120)
         self.volume_slider.setStyleSheet("""
             QSlider::groove:horizontal { 
                 height: 4px; 
@@ -250,9 +257,9 @@ class PlayerControls(QFrame):
         volume_layout.addWidget(self.volume_slider)
         
         # Add all sections to main layout with proportional stretch factors
-        layout.addLayout(left_layout, 15)
-        layout.addLayout(controls_layout, 75)
-        layout.addLayout(volume_layout, 10)
+        layout.addWidget(self.left_widget)
+        layout.addLayout(controls_layout, 1)
+        layout.addWidget(self.right_widget)
         
         # Network manager for artwork loading
         self.network_manager = QNetworkAccessManager()
@@ -372,11 +379,6 @@ class PlayerControls(QFrame):
     
     def resizeEvent(self, a0):
         super().resizeEvent(a0)
-        total_width = self.width()
-        info_width = int(total_width * 0.20)
-        self._info_widget.setMaximumWidth(info_width)
-        volume_width = int(total_width * 0.20)
-        self.volume_slider.setFixedWidth(max(60, volume_width))
     
     def _on_album_clicked(self):
         self.albumClicked.emit(self.album_id)

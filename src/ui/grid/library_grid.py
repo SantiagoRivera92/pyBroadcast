@@ -59,12 +59,24 @@ class LibraryGrid(QScrollArea):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.container = QWidget()
         self.container.setStyleSheet("background-color: #0f0f0f;")
-        self.grid = QGridLayout(self.container)
+        
+        self.main_layout = QVBoxLayout(self.container)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSpacing(0)
+        
+        self.header_container = QWidget()
+        self.header_layout = QVBoxLayout(self.header_container)
+        self.header_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.addWidget(self.header_container)
+        
+        self.grid_container = QWidget()
+        self.grid = QGridLayout(self.grid_container)
         self.grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.grid.setSpacing(10)
         self.grid.setContentsMargins(10, 10, 10, 10)
-        self.api = api
+        self.main_layout.addWidget(self.grid_container)
         
+        self.api = api
         self.setWidget(self.container)
         
         self.callback = item_click_callback
@@ -105,6 +117,19 @@ class LibraryGrid(QScrollArea):
             available_width = viewport.width() - (2 * self.margin)
         cols = max(1, available_width // (self.item_width + self.item_spacing))
         return cols
+
+    def set_header(self, widget):
+        """Add a header widget that scrolls with the grid"""
+        # Clear existing header
+        for i in reversed(range(self.header_layout.count())):
+            item = self.header_layout.itemAt(i)
+            if item and item.widget():
+                # Don't delete it, just remove from layout
+                item.widget().setParent(None)
+        
+        if widget:
+            self.header_layout.addWidget(widget)
+            widget.setVisible(True)
 
     def clear(self):
         self.pending_items.clear()
