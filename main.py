@@ -18,6 +18,7 @@ from src.ui.navigation.sidebar_navigation import SidebarNavigation
 from src.ui.grid.library_grid import LibraryGrid
 from src.ui.player.player_controls import PlayerControls
 from src.ui.artist.artist_header import ArtistHeader
+from src.ui.artist.artist_discography_view import ArtistDiscographyView
 from src.ui.album.album_detail_view import AlbumDetailView
 from src.ui.playlist.playlist_detail_view import PlaylistDetailView
 from src.ui.queue.queue_sidebar import QueueSidebar
@@ -357,6 +358,7 @@ class iBroadcastNative(QMainWindow):
         self.content_stack = QStackedWidget()
         self.artists_view = LibraryGrid(self.show_artist_albums, self.api)
         self.albums_view = LibraryGrid(self.show_album_detail, self.api)
+        self.artist_discography_view = ArtistDiscographyView(self.api)
         self.playlists_view = LibraryGrid(self.show_playlist_detail, self.api)
         self.search_results_view = LibraryGrid(self.handle_search_result_click, self.api)
         self.album_detail_view = AlbumDetailView()
@@ -368,6 +370,7 @@ class iBroadcastNative(QMainWindow):
 
         self.content_stack.addWidget(self.artists_view)
         self.content_stack.addWidget(self.albums_view)
+        self.content_stack.addWidget(self.artist_discography_view)
         self.content_stack.addWidget(self.playlists_view)
         self.content_stack.addWidget(self.album_detail_view)
         self.content_stack.addWidget(self.playlist_detail_view)
@@ -380,8 +383,8 @@ class iBroadcastNative(QMainWindow):
             self.show_track_context_menu_album
         )
         
-        self.playlist_detail_view.track_list.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.playlist_detail_view.track_list.table.customContextMenuRequested.connect(
+        self.playlist_detail_view.album_track_list.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.playlist_detail_view.album_track_list.table.customContextMenuRequested.connect(
             self.show_track_context_menu_playlist
         )
         
@@ -410,6 +413,22 @@ class iBroadcastNative(QMainWindow):
         self.controls.progress.valueChanged.connect(self.on_seek_progress)
         self.controls.albumClicked.connect(self.show_album_detail)
         self.controls.artistClicked.connect(self.show_artist_albums)
+
+        self.album_detail_view.playTrackRequested.connect(self.play_track_by_id)
+        self.album_detail_view.artistClicked.connect(self.show_artist_albums)
+        self.playlist_detail_view.playTrackRequested.connect(self.play_track_by_id)
+        self.playlist_detail_view.artistClicked.connect(self.show_artist_albums)
+
+        self.artist_discography_view.playTrackRequested.connect(self.play_track_solo)
+        self.artist_discography_view.playAlbumRequested.connect(self.play_album)
+        self.artist_discography_view.artistClicked.connect(self.show_artist_albums)
+        self.artist_discography_view.upButtonClicked.connect(self.show_artists)
+
+        self.album_detail_view.album_header.playButtonClicked.connect(lambda: self.play_album(self.current_album_id))
+        self.playlist_detail_view.playlist_header.playButtonClicked.connect(lambda: self.play_playlist(self.current_playlist_id))
+
+    def show_artists(self):
+        self.switch_view(0)
 
     def handle_search_result_click(self, item_id):
         # Try to find the item in artists, albums, or tracks
@@ -464,7 +483,7 @@ class iBroadcastNative(QMainWindow):
             menu.exec(viewport.mapToGlobal(pos))
     
     def show_track_context_menu_playlist(self, pos):
-        table = self.playlist_detail_view.track_list.table
+        table = self.playlist_detail_view.album_track_list.table
         row = table.rowAt(pos.y())
         if row < 0:
             return
@@ -688,6 +707,13 @@ class iBroadcastNative(QMainWindow):
         self.album_detail_view.set_album(album.name, artist_name, year, artwork_url)
         
         tracks.sort(key=lambda x: x.track_number if x.track_number is not None else 0)
+        # Pre-populate artist name and full artist objects for the table
+        for track in tracks:
+            if not hasattr(track, 'extra_data') or track.extra_data is None:
+                track.extra_data = {}
+            track.extra_data['artist_name'] = artist_name
+            track.extra_data['artists'] = artists
+            
         self.album_detail_view.set_tracks(tracks)
         
         self._current_album_tracks = [t.id for t in tracks]
@@ -718,6 +744,13 @@ class iBroadcastNative(QMainWindow):
             self.api.get_artwork_url(playlist.artwork_id)
         )
         
+        for track in tracks:
+            if not hasattr(track, 'extra_data') or track.extra_data is None:
+                track.extra_data = {}
+            t_artists = self.api.get_artists_by_track(track.id)
+            track.extra_data['artist_name'] = ", ".join([a.name for a in t_artists]) if t_artists else "Unknown Artist"
+            track.extra_data['artists'] = t_artists
+            
         self.playlist_detail_view.set_tracks(tracks)
         
         self._current_playlist_tracks = [t.id for t in tracks]
@@ -734,7 +767,6 @@ class iBroadcastNative(QMainWindow):
             self.playlists_view.add_item(playlist, self.api.get_artwork_url(playlist.artwork_id))
 
     def show_artist_albums(self, artist_id, push_to_stack=True):
-        
         if isinstance(artist_id, int):
             artist = self.api.get_artist_by_id(artist_id)
         elif isinstance(artist_id, str) and artist_id.isdigit():
@@ -750,11 +782,10 @@ class iBroadcastNative(QMainWindow):
             self.push_page({"type": "Artist", "id": int(artist_id)})
         
         if artist:
-            self.artist_header.set_artist(artist.name, self.api.get_artwork_url(artist.artwork_id))
             self._showing_artist_albums = True
-            self.albums_view.set_header(self.artist_header)
-            self.content_stack.setCurrentWidget(self.albums_view)
-            self.load_albums(artist_id)
+            albums = self.api.get_artist_albums(artist_id)
+            self.artist_discography_view.set_artist_discography(artist, albums)
+            self.content_stack.setCurrentWidget(self.artist_discography_view)
         else:
             self._showing_artist_albums = False
 
@@ -1192,6 +1223,37 @@ class iBroadcastNative(QMainWindow):
                 # Give a small moment for the push to go out
                 time.sleep(0.5)
         super().closeEvent(event)
+
+    def play_track_solo(self, track_id):
+        if not track_id:
+            return
+        self.clear_queue()
+        self.play_track_by_id(track_id)
+
+    def play_album(self, album_id):
+        if not album_id:
+            return
+        tracks = self.api.get_tracks_by_album(album_id)
+        if tracks:
+            tracks.sort(key=lambda x: x.track_number if x.track_number is not None else 0)
+            self.tracks = [t.id for t in tracks]
+            self.play_index = 0
+            self.play_from = "tracks"
+            self.play_next_queue = []
+            self.update_queue_display()
+            self.play_track_by_id(self.tracks[0])
+
+    def play_playlist(self, playlist_id):
+        if not playlist_id:
+            return
+        tracks = self.api.get_playlist_tracks(playlist_id)
+        if tracks:
+            self.tracks = [t.id for t in tracks]
+            self.play_index = 0
+            self.play_from = "tracks"
+            self.play_next_queue = []
+            self.update_queue_display()
+            self.play_track_by_id(self.tracks[0])
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

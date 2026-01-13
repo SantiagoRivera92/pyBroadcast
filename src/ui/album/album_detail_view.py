@@ -6,6 +6,7 @@ from src.ui.album.album_track_list import AlbumTrackList
 class AlbumDetailView(QScrollArea):
     playTrackRequested = pyqtSignal(object)
     upButtonClicked = pyqtSignal(object)
+    artistClicked = pyqtSignal(str)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -27,6 +28,7 @@ class AlbumDetailView(QScrollArea):
         self.album_track_list.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.album_track_list.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.album_track_list.playTrackRequested.connect(self.playTrackRequested.emit)
+        self.album_track_list.artistClicked.connect(self.artistClicked.emit)
         
         layout.addWidget(self.album_header)
         layout.addWidget(self.album_track_list)

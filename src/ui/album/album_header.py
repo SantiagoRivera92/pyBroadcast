@@ -8,8 +8,9 @@ from src.ui.utils.scrolling_label import ScrollingLabel
 
 class AlbumHeader(QFrame):
     upButtonClicked = pyqtSignal(object)
+    playButtonClicked = pyqtSignal()
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, show_up_button=True):
         super().__init__(parent)
         self.setFixedHeight(280)
         self.setStyleSheet("""
@@ -124,29 +125,50 @@ class AlbumHeader(QFrame):
         layout.addWidget(info_container)
         layout.addStretch()
         
-        self.up_button = QPushButton("↑ Artist")
-        self.up_button.setStyleSheet("""
+        if show_up_button:
+            self.up_button = QPushButton("↑ Artist")
+            self.up_button.setStyleSheet("""
+                QPushButton {
+                    background-color: #1a1a1a;
+                    color: #4DA6FF;
+                    border: 1px solid #2a2a2a;
+                    border-radius: 6px;
+                    padding: 8px 16px;
+                    font-weight: bold;
+                    font-size: 13px;
+                }
+                QPushButton:hover {
+                    background-color: #252525;
+                    border: 1px solid #4DA6FF;
+                }
+            """)
+            self.up_button.setFixedHeight(40)
+            layout.addWidget(self.up_button)
+        
+        self.play_button = QPushButton("Play")
+        self.play_button.setFixedSize(100, 40)
+        self.play_button.setStyleSheet("""
             QPushButton {
-                background-color: #1a1a1a;
-                color: #4DA6FF;
-                border: 1px solid #2a2a2a;
-                border-radius: 6px;
-                padding: 8px 16px;
+                background-color: #4DA6FF;
+                color: white;
+                border: none;
+                border-radius: 20px;
                 font-weight: bold;
-                font-size: 13px;
+                font-size: 14px;
             }
             QPushButton:hover {
-                background-color: #252525;
-                border: 1px solid #4DA6FF;
+                background-color: #66b3ff;
             }
         """)
-        self.up_button.setFixedHeight(40)
-        layout.addWidget(self.up_button)
+        self.play_button.clicked.connect(self.playButtonClicked.emit)
+        
+        layout.addWidget(self.play_button)
 
         self.network_manager = QNetworkAccessManager()
         
     def set_artist_id(self, artist_id):
-        self.up_button.clicked.connect(lambda: self.upButtonClicked.emit(artist_id))
+        if self.up_button:
+            self.up_button.clicked.connect(lambda: self.upButtonClicked.emit(artist_id))
 
     def set_album(self, name, artist, year, artwork_url=None):
         self.album_name.setText(name)

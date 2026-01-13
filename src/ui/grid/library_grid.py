@@ -194,39 +194,40 @@ class LibraryGrid(QScrollArea):
         t_label.setFixedWidth(self.item_width + 2)
         t_label.setFixedHeight(28)
 
-        s_label = ScrollingLabel(item_widget)
-        s_label.setText(library_item.get_subtitle(self.api) or "")
-        s_label.setGap(25)
-        s_label.setStyleSheet('''
-            QLabel {
-                color: #b3b3b3;
-                font-size: 14px;
-                margin-left: 2px;
-                background: transparent;
-            }
-        ''')
-        s_label.setWordWrap(True)
-        s_label.setFixedWidth(self.item_width + 2)
-    
         layout.addWidget(img_label)
         layout.addWidget(t_label)
-        layout.addWidget(s_label)
-        
-        
-        ss_label = ScrollingLabel(item_widget)
-        ss_label.setText(library_item.get_second_subtitle(self.api) or "")
-        ss_label.setGap(25)
-        ss_label.setStyleSheet('''
-            QLabel {
-                color: #b3b3b3;
-                font-size: 14px;
-                margin-left: 2px;
-                background: transparent;
-            }
-        ''')
-        ss_label.setWordWrap(True)
-        ss_label.setFixedWidth(self.item_width + 2)
-        layout.addWidget(ss_label)
+
+        if (library_item.get_subtitle(self.api)):
+            s_label = ScrollingLabel(item_widget)
+            s_label.setText(library_item.get_subtitle(self.api) or "")
+            s_label.setGap(25)
+            s_label.setStyleSheet('''
+                QLabel {
+                    color: #b3b3b3;
+                    font-size: 14px;
+                    margin-left: 2px;
+                    background: transparent;
+                }
+            ''')
+            s_label.setWordWrap(True)
+            s_label.setFixedWidth(self.item_width + 2)
+            layout.addWidget(s_label)
+    
+        if (library_item.get_second_subtitle(self.api)):
+            ss_label = ScrollingLabel(item_widget)
+            ss_label.setText(library_item.get_second_subtitle(self.api) or "")
+            ss_label.setGap(25)
+            ss_label.setStyleSheet('''
+                QLabel {
+                    color: #b3b3b3;
+                    font-size: 14px;
+                    margin-left: 2px;
+                    background: transparent;
+                }
+            ''')
+            ss_label.setWordWrap(True)
+            ss_label.setFixedWidth(self.item_width + 2)
+            layout.addWidget(ss_label)
         
         # Add to grid at current position
         self.grid.addWidget(item_widget, self.current_row, self.current_col)

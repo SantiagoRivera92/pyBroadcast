@@ -8,6 +8,7 @@ from src.ui.utils.scrolling_label import ScrollingLabel
 
 class PlaylistHeader(QFrame):
     upButtonClicked = pyqtSignal()
+    playButtonClicked = pyqtSignal()
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -52,13 +53,21 @@ class PlaylistHeader(QFrame):
 
         self.playlist_name = ScrollingLabel(info_container)
         self.playlist_name.setText("Playlist Name")
+        self.playlist_name.setFixedHeight(60)
+        self.playlist_name.setMaximumWidth(700)
+        self.playlist_name.setMinimumWidth(200)
         self.playlist_name.setStyleSheet("""
-            color: white; 
-            font-size: 48px; 
-            font-weight: bold;
-            background: none;
+            QLabel {
+                color: white; 
+                font-size: 48px; 
+                font-weight: bold;
+                background: none;
+                padding: 0px;
+                border: none;
+            }
         """)
-        self.playlist_name.setWordWrap(True)
+        self.playlist_name.setTextFormat(Qt.TextFormat.PlainText)
+        self.playlist_name.setSizePolicy(self.playlist_name.sizePolicy().horizontalPolicy(), self.playlist_name.sizePolicy().verticalPolicy())
 
         self.track_count_label = QLabel("")
         self.track_count_label.setStyleSheet("color: #b3b3b3; font-size: 16px; background: none;")
@@ -89,6 +98,25 @@ class PlaylistHeader(QFrame):
         """)
         self.up_button.setFixedHeight(40)
         self.up_button.clicked.connect(self.upButtonClicked.emit)
+        
+        self.play_button = QPushButton("Play")
+        self.play_button.setFixedSize(100, 40)
+        self.play_button.setStyleSheet("""
+            QPushButton {
+                background-color: #4DA6FF;
+                color: white;
+                border: none;
+                border-radius: 20px;
+                font-weight: bold;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #66b3ff;
+            }
+        """)
+        self.play_button.clicked.connect(self.playButtonClicked.emit)
+        
+        layout.addWidget(self.play_button)
         layout.addWidget(self.up_button)
 
         self.network_manager = QNetworkAccessManager()
