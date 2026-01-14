@@ -16,7 +16,7 @@ from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtCore import QUrl, QTimer, Qt
 from PyQt6.QtGui import QAction, QIcon, QFontDatabase, QFont
 
-from src.api.ibroadcast.models import Artist, Album, Track, Playlist
+from src.api.ibroadcast.models import Artist, Album, ExtraData, Track, Playlist
 from src.api.ibroadcast.ibroadcast_api import iBroadcastAPI
 from src.api.ibroadcast.play_queue_socket import PlayQueueSocket
 
@@ -97,7 +97,8 @@ class iBroadcastNative(QMainWindow):
         if result:
             token = result.get("token")
             session_uuid = result.get("session_uuid")
-            self.socket.connect_to_server(token, session_uuid)
+            if token and session_uuid:
+                self.socket.connect_to_server(token, session_uuid)
 
     def on_library_update_requested(self, last_modified):
         self.api.load_library()
@@ -213,6 +214,14 @@ class iBroadcastNative(QMainWindow):
         self.track_duration = track.length
         artwork_url = self.api.get_artwork_url(track.artwork_id)
         self.controls.set_track_info(track, album, artists, album_artists, artwork_url)
+
+        # Update selected track in current view
+        if self.content_stack.currentWidget() == self.album_detail_view:
+            self.album_detail_view.album_track_list.set_selected_track(track_id)
+        elif self.content_stack.currentWidget() == self.playlist_detail_view:
+            self.playlist_detail_view.album_track_list.set_selected_track(track_id)
+        elif self.content_stack.currentWidget() == self.artist_discography_view:
+            self.artist_discography_view.set_selected_track(track_id)
 
         # Update MPRIS metadata
         self.mpris.update_metadata(
@@ -411,17 +420,11 @@ class iBroadcastNative(QMainWindow):
 
         content_layout.addWidget(self.content_stack)
 
-        self.album_detail_view.album_track_list.table.setContextMenuPolicy(
-            Qt.ContextMenuPolicy.CustomContextMenu
-        )
-        self.album_detail_view.album_track_list.table.customContextMenuRequested.connect(
+        self.album_detail_view.album_track_list.trackContextMenuRequested.connect(
             self.show_track_context_menu_album
         )
 
-        self.playlist_detail_view.album_track_list.table.setContextMenuPolicy(
-            Qt.ContextMenuPolicy.CustomContextMenu
-        )
-        self.playlist_detail_view.album_track_list.table.customContextMenuRequested.connect(
+        self.playlist_detail_view.album_track_list.trackContextMenuRequested.connect(
             self.show_track_context_menu_playlist
         )
 
@@ -508,57 +511,35 @@ class iBroadcastNative(QMainWindow):
         dialog = OptionsDialog(self.api, self, on_close_callback=self.check_auth)
         dialog.exec()
 
-    def show_track_context_menu_album(self, pos):
-        table = self.album_detail_view.album_track_list.table
-        row = table.rowAt(pos.y())
-        if row < 0:
-            return
-
+    def show_track_context_menu_album(self, track, global_pos):
         menu = TrackContextMenu(self, is_playlist=False)
-        menu.play_action.triggered.connect(
-            lambda: self.play_track_from_album_at_row(row)
-        )
+        menu.play_action.triggered.connect(lambda: self.play_track_by_id(track.id))
         menu.add_next_action.triggered.connect(
-            lambda: self.add_track_to_queue_from_album(row, after_current=True)
+            lambda: self.add_track_to_queue_from_album(track, after_current=True)
         )
         menu.add_end_action.triggered.connect(
-            lambda: self.add_track_to_queue_from_album(row, after_current=False)
+            lambda: self.add_track_to_queue_from_album(track, after_current=False)
         )
 
-        viewport = table.viewport()
-        if viewport:
-            menu.exec(viewport.mapToGlobal(pos))
+        menu.exec(global_pos)
 
-    def show_track_context_menu_playlist(self, pos):
-        table = self.playlist_detail_view.album_track_list.table
-        row = table.rowAt(pos.y())
-        if row < 0:
-            return
-
+    def show_track_context_menu_playlist(self, track, global_pos):
         menu = TrackContextMenu(self, is_playlist=True)
-        menu.play_action.triggered.connect(
-            lambda: self.play_track_from_playlist_at_row(row)
-        )
+        menu.play_action.triggered.connect(lambda: self.play_track_by_id(track.id))
         menu.add_next_action.triggered.connect(
-            lambda: self.add_track_to_queue_from_playlist(row, after_current=True)
+            lambda: self.add_track_to_queue_from_playlist(track, after_current=True)
         )
         menu.add_end_action.triggered.connect(
-            lambda: self.add_track_to_queue_from_playlist(row, after_current=False)
+            lambda: self.add_track_to_queue_from_playlist(track, after_current=False)
         )
         menu.go_to_album_action.triggered.connect(
-            lambda: self._go_to_album_from_playlist_row(row)
+            lambda: self._go_to_album_from_playlist_row(track)
         )
 
-        viewport = table.viewport()
-        if viewport:
-            menu.exec(viewport.mapToGlobal(pos))
+        menu.exec(global_pos)
 
-    def _go_to_album_from_playlist_row(self, row):
-        if not hasattr(self, "_current_playlist_tracks") or row >= len(
-            self._current_playlist_tracks
-        ):
-            return
-        track_id = self._current_playlist_tracks[row]
+    def _go_to_album_from_playlist_row(self, track):
+        track_id = track.id
         album = self.api.get_album_by_track(int(track_id))
         if album:
             self.show_album_detail(album.id)
@@ -777,15 +758,21 @@ class iBroadcastNative(QMainWindow):
         tracks.sort(key=lambda x: x.track_number if x.track_number is not None else 0)
         # Pre-populate artist name and full artist objects for the table
         for track in tracks:
-            if not hasattr(track, "extra_data") or track.extra_data is None:
-                track.extra_data = {}
-            track.extra_data["artist_name"] = artist_name
-            track.extra_data["artists"] = artists
+            track_artists = self.api.get_artists_by_track(track.id)
+            extraData = ExtraData()
+            extraData.artists = track_artists
+            extraData.artist_name = (
+                ", ".join([a.name for a in track_artists])
+                if track_artists
+                else "Unknown Artist"
+            )
+            track.extra_data = extraData
 
         self.album_detail_view.set_tracks(tracks)
 
         self._current_album_tracks = [t.id for t in tracks]
         self.content_stack.setCurrentWidget(self.album_detail_view)
+        self.album_detail_view.set_selected_track(self.current_track_id)
         self._showing_artist_albums = False
         self.artist_header.setVisible(self._showing_artist_albums)
         self.artist_header.upButtonClicked.connect(self.load_artists)
@@ -811,20 +798,21 @@ class iBroadcastNative(QMainWindow):
         )
 
         for track in tracks:
-            if not hasattr(track, "extra_data") or track.extra_data is None:
-                track.extra_data = {}
-            t_artists = self.api.get_artists_by_track(track.id)
-            track.extra_data["artist_name"] = (
-                ", ".join([a.name for a in t_artists])
-                if t_artists
+            track_artists = self.api.get_artists_by_track(track.id)
+            extraData = ExtraData()
+            extraData.artists = track_artists
+            extraData.artist_name = (
+                ", ".join([a.name for a in track_artists])
+                if track_artists
                 else "Unknown Artist"
             )
-            track.extra_data["artists"] = t_artists
+            track.extra_data = extraData
 
         self.playlist_detail_view.set_tracks(tracks)
 
         self._current_playlist_tracks = [t.id for t in tracks]
         self.content_stack.setCurrentWidget(self.playlist_detail_view)
+        self.playlist_detail_view.set_selected_track(self.current_track_id)
 
     def load_playlists(self):
         self.artist_header.setVisible(False)
@@ -857,6 +845,7 @@ class iBroadcastNative(QMainWindow):
             albums = self.api.get_artist_albums(artist_id)
             self.artist_discography_view.set_artist_discography(artist, albums)
             self.content_stack.setCurrentWidget(self.artist_discography_view)
+            self.artist_discography_view.set_selected_track(self.current_track_id)
         else:
             self._showing_artist_albums = False
 
@@ -891,13 +880,14 @@ class iBroadcastNative(QMainWindow):
         self.update_queue_display()
         self.play_track_by_id(track_id)
 
-    def add_track_to_queue_from_album(self, row, after_current=False):
-        if not hasattr(self, "_current_album_tracks") or row >= len(
-            self._current_album_tracks
+    def add_track_to_queue_from_album(self, track, after_current=False):
+        if (
+            not hasattr(self, "_current_album_tracks")
+            or track.id not in self._current_album_tracks
         ):
             return
 
-        track_id = self._current_album_tracks[row]
+        track_id = track.id
         # Append to play_next or end of tracks?
         # iBroadcast context menu usually has "Play Next" and "Add to Queue"
         if after_current:
@@ -938,13 +928,8 @@ class iBroadcastNative(QMainWindow):
         self.update_queue_display()
         self.play_track_by_id(track_id)
 
-    def add_track_to_queue_from_playlist(self, row, after_current=False):
-        if not hasattr(self, "_current_playlist_tracks") or row >= len(
-            self._current_playlist_tracks
-        ):
-            return
-
-        track_id = self._current_playlist_tracks[row]
+    def add_track_to_queue_from_playlist(self, track, after_current=False):
+        track_id = track.id
         if after_current:
             self.play_next_queue.insert(0, track_id)
         else:
@@ -999,6 +984,14 @@ class iBroadcastNative(QMainWindow):
             )
             self.controls.set_playing(start_playing)
 
+            # Update selected track in current view
+            if self.content_stack.currentWidget() == self.album_detail_view:
+                self.album_detail_view.set_selected_track(track_id)
+            elif self.content_stack.currentWidget() == self.playlist_detail_view:
+                self.playlist_detail_view.set_selected_track(track_id)
+            elif self.content_stack.currentWidget() == self.artist_discography_view:
+                self.artist_discography_view.set_selected_track(track_id)
+
             # Update MPRIS metadata
             self.mpris.update_metadata(
                 {
@@ -1029,6 +1022,14 @@ class iBroadcastNative(QMainWindow):
         self.mpris.update_status("Playing" if is_playing else "Paused")
 
     def toggle_play(self):
+        # Propagate currently playing song to all views
+        if self.content_stack.currentWidget() == self.album_detail_view:
+            self.album_detail_view.set_selected_track(self.current_track_id)
+        elif self.content_stack.currentWidget() == self.playlist_detail_view:
+            self.playlist_detail_view.set_selected_track(self.current_track_id)
+        elif self.content_stack.currentWidget() == self.artist_discography_view:
+            self.artist_discography_view.set_selected_track(self.current_track_id)
+            
         if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.media_player.pause()
             self.controls.set_playing(False)
@@ -1040,22 +1041,11 @@ class iBroadcastNative(QMainWindow):
     def play_next(self):
         """Play the next track based on server-synced queues."""
         if self.role != "player":
-            # Just send a 'next' command if we are a controller?
-            # Or just wait for the player to advance.
-            # Usually iBroadcast controllers send a command to the player.
-            # For now, let's just do nothing or send a specific command if supported.
             return
-
-        # 1. Handle play_next queue (must be consumed)
         if self.play_from == "play_next" or len(self.play_next_queue) > 0:
             if len(self.play_next_queue) > 0:
                 self.play_from = "play_next"
-                # Pop the current one (if we were already playing it) or the first one
-                # Logic: play_next always plays the first item.
-                # After it finishes, we should have already popped it?
-                # Let's say we pop it NOW before playing the NEXT one.
                 self.play_next_queue.pop(0)
-
                 if len(self.play_next_queue) > 0:
                     self.play_track_by_id(self.play_next_queue[0])
                 else:
@@ -1102,7 +1092,8 @@ class iBroadcastNative(QMainWindow):
 
         if self.play_from == "tracks" and self.play_index > 0:
             self.play_index -= 1
-            self.play_track_by_id(self.tracks[self.play_index])
+            if self.play_index < len(self.tracks):
+                self.play_track_by_id(self.tracks[self.play_index])
         else:
             # Restart current track if we can't go back
             self.media_player.setPosition(0)
@@ -1334,7 +1325,7 @@ class iBroadcastNative(QMainWindow):
         self.update_queue_display()
         self.push_state_to_server()
 
-    def closeEvent(self, event):
+    def closeEvent(self, a0):
         """Pause playback on server when closing if we are the player"""
         if self.role == "player":
             if (
@@ -1346,7 +1337,7 @@ class iBroadcastNative(QMainWindow):
                 self.push_state_to_server()
                 # Give a small moment for the push to go out
                 time.sleep(0.5)
-        super().closeEvent(event)
+        super().closeEvent(a0)
 
     def play_track_solo(self, track_id):
         if not track_id:

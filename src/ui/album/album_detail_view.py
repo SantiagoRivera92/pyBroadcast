@@ -24,9 +24,6 @@ class AlbumDetailView(QScrollArea):
         self.album_header = AlbumHeader()
         self.album_header.upButtonClicked.connect(self.upButtonClicked.emit)
         self.album_track_list = AlbumTrackList()
-        # Disable track list's internal scrolling so it scrolls with the detail view
-        self.album_track_list.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.album_track_list.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.album_track_list.playTrackRequested.connect(self.playTrackRequested.emit)
         self.album_track_list.artistClicked.connect(self.artistClicked.emit)
         
@@ -44,3 +41,6 @@ class AlbumDetailView(QScrollArea):
         
     def set_artist_id(self, artist_id):
         self.album_header.set_artist_id(artist_id)
+        
+    def set_selected_track(self, track_id):
+        self.album_track_list.set_selected_track(track_id)

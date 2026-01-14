@@ -5,7 +5,7 @@ from src.ui.album.album_track_list import AlbumTrackList
 from src.ui.artist.artist_header import ArtistHeader
 from src.ui.grid.library_grid import LibraryGrid
 from src.api.ibroadcast.ibroadcast_api import iBroadcastAPI
-from src.api.ibroadcast.models import BaseModel, Track
+from src.api.ibroadcast.models import BaseModel, ExtraData, Track
 from src.ui.utils.hoverable_widget import HoverableWidget
 from src.ui.utils.rounded_image import RoundedImage
 from src.ui.utils.scrolling_label import ScrollingLabel
@@ -39,9 +39,18 @@ class ArtistDiscographyView(QScrollArea):
         # Clear the layout
         while self.main_layout.count():
             item = self.main_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
+            if item:
+                widget = item.widget()
+                if widget:
+                    widget.deleteLater()
+                    
+    def set_selected_track(self, track_id):
+        for i in range(self.main_layout.count()):
+            item = self.main_layout.itemAt(i)
+            if item:
+                widget = item.widget()
+                if isinstance(widget, AlbumTrackList):
+                    widget.set_selected_track(track_id)
 
     def set_artist_discography(self, artist, albums):
         self.clear()
@@ -97,7 +106,8 @@ class ArtistDiscographyView(QScrollArea):
                         
                         request = QNetworkRequest(QUrl(artwork_url))
                         reply = manager.get(request)
-                        reply.finished.connect(lambda r=reply: set_img(r))
+                        if reply:
+                            reply.finished.connect(lambda r=reply: set_img(r))
 
                     t_label = ScrollingLabel(item_widget)
                     t_label.setText(track.name)
@@ -149,14 +159,14 @@ class ArtistDiscographyView(QScrollArea):
                 
                 # Pre-populate artist name and full artist objects for the table
                 for track in tracks:
-                    if not hasattr(track, 'extra_data') or track.extra_data is None:
-                        track.extra_data = {}
-                    track.extra_data['artist_name'] = artist_name
-                    track.extra_data['artists'] = artists
+                    track_artists = self.api.get_artists_by_track(track.id)
+                    extraData = ExtraData()
+                    extraData.artists = track_artists
+                    extraData.artist_name = ", ".join([a.name for a in track_artists]) if track_artists else "Unknown Artist"
+                    track.extra_data = extraData
                 
                 track_list.set_tracks(tracks)
                 track_list.playTrackRequested.connect(self.playTrackRequested.emit)
-                track_list.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
                 
                 self.main_layout.addWidget(track_list)
         

@@ -9,15 +9,6 @@ class ArtistLinksLabel(QLabel):
         self.setTextFormat(Qt.TextFormat.RichText)
         self.setOpenExternalLinks(False)
         self.linkActivated.connect(self.on_link_activated)
-        self.setStyleSheet("""
-            QLabel {
-                color: #b3b3b3;
-                font-size: 13px;
-                background: transparent;
-                border: none;
-                padding: 0;
-            }
-        """)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def set_artists(self, artists):
@@ -28,7 +19,7 @@ class ArtistLinksLabel(QLabel):
         links = []
         for artist in artists:
             # We use a custom scheme or just the ID in the href
-            links.append(f'<a href="{artist.id}" style="color: #b3b3b3; text-decoration: none;">{artist.name}</a>')
+            links.append(f'<a href="{artist.id}" style="color: #b3b3b3; text-decoration: none; background-color: transparent;">{artist.name}</a>')
         
         self.setText(", ".join(links))
 
