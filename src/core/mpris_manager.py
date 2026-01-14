@@ -206,17 +206,23 @@ class MPRISManager:
         
     def update_status(self, status):
         """status: 'Playing', 'Paused', 'Stopped'"""
+        if not HAS_MPRIS_DEPS:
+            return
         if self._playback_status == status:
             return
         self._playback_status = status
         self._emit_properties_changed("org.mpris.MediaPlayer2.Player", {"PlaybackStatus": GLib.Variant('s', status)})
         
     def update_metadata(self, track_info):
+        if not HAS_MPRIS_DEPS:
+            return
         self._metadata = track_info
         metadata = self._get_mpris_metadata()
         self._emit_properties_changed("org.mpris.MediaPlayer2.Player", {"Metadata": GLib.Variant('a{sv}', metadata)})
         
     def update_volume(self, volume_float):
+        if not HAS_MPRIS_DEPS:
+            return
         if self._volume == volume_float:
             return
         self._volume = volume_float
